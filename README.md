@@ -1,3 +1,5 @@
+> **Keycloak-only prerelease:** This branch is version `4.0.0-keycloak.0`. Read [KEYCLOAK.md](KEYCLOAK.md) before using it. Auth0-issuing services must stay on their existing pinned version. The legacy examples below describe 3.x and are not the configuration contract for this prerelease.
+
 # tc-core-library-js
 
 Library that contains utils, middlewares etc that can be used by all Topocder Services.

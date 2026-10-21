@@ -1,6 +1,6 @@
 {
   "name": "tc-core-library-js",
-  "version": "3.0.1",
+  "version": "4.0.0-keycloak.0",
   "description": "Topcoder Core library for express based microservices",
   "main": "index.js",
   "author": "Parth Shah",
@@ -8,12 +8,14 @@
   "devDependencies": {
     "chai": "^4.2.0",
     "chai-as-promised": "^7.1.1",
-    "mocha": "^11.7.5"
+    "eslint": "^9.39.0",
+    "mocha": "^11.7.5",
+    "nock": "^14.0.17"
   },
   "dependencies": {
     "axios": "^0.30.2",
     "bunyan": "^1.8.12",
-    "jsonwebtoken": "^9.0.2",
+    "jsonwebtoken": "^9.0.3",
     "jwks-rsa": "^3.2.0",
     "lodash": "^4.17.15",
     "millisecond": "^0.1.2",
@@ -23,10 +25,13 @@
     "axios": "^0.30.2"
   },
   "engines": {
-    "node": ">= 14"
+    "node": ">=18.19"
   },
   "scripts": {
-    "test": "SUPPRESS_NO_CONFIG_WARNING=1 ENVIRONMENT=test ./node_modules/.bin/mocha $(find . -path '*spec.js' -not -path './node_modules/*')"
+    "test": "pnpm test:keycloak && mocha lib/authorizer/authorizer.spec.js",
+    "lint": "eslint --config eslint.keycloak.config.cjs lib/keycloak lib/auth lib/middleware/jwtAuthenticator.js test/keycloak scripts index.js",
+    "build": "node scripts/build.js",
+    "test:keycloak": "node --test test/keycloak/*.test.js"
   },
   "repository": {
     "type": "git",
@@ -39,5 +44,13 @@
   "bugs": {
     "url": "https://github.com/appirio-tech/tc-core-library-js/issues"
   },
-  "homepage": "https://github.com/appirio-tech/tc-core-library-js#readme"
+  "homepage": "https://github.com/appirio-tech/tc-core-library-js#readme",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "lib",
+    "README.md",
+    "KEYCLOAK.md"
+  ],
+  "types": "index.d.ts"
 }
