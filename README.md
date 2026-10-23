@@ -1,4 +1,4 @@
-> **Keycloak prerelease:** This branch is version `4.0.0-keycloak.1`. Read [KEYCLOAK.md](KEYCLOAK.md) before using it. `USE_KEYCLOAK=true` selects Keycloak M2M; unset or `false` keeps Auth0 M2M issuance (3.x `AUTH0_*` settings) so a service can be rolled back by configuration alone. The legacy examples below describe 3.x and are not the validation contract for this prerelease.
+> **Keycloak prerelease:** This branch is version `4.0.0-keycloak.2`. Read [KEYCLOAK.md](KEYCLOAK.md) before using it. `USE_KEYCLOAK=true` selects Keycloak M2M; unset or `false` keeps Auth0 M2M issuance (3.x `AUTH0_*` settings) so a service can be rolled back by configuration alone. The legacy examples below describe 3.x and are not the validation contract for this prerelease.
 
 # tc-core-library-js
 

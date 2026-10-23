@@ -1,6 +1,6 @@
 {
   "name": "tc-core-library-js",
-  "version": "4.0.0-keycloak.1",
+  "version": "4.0.0-keycloak.2",
   "description": "Topcoder Core library for express based microservices",
   "main": "index.js",
   "author": "Parth Shah",

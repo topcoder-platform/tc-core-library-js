@@ -1,6 +1,6 @@
 # Keycloak M2M prerelease
 
-Version `4.0.0-keycloak.1` is confined to `keycloak_m2M`. Do not publish it as npm
+Version `4.0.0-keycloak.2` is confined to `keycloak_m2M`. Do not publish it as npm
 `latest` or replace `master`. Pin its reviewed Git commit in each opted-in service.
 Unmigrated Auth0 services keep their current dependency and deployment configuration.
 
