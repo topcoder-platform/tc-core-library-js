@@ -274,3 +274,34 @@ test("LEGACY_M2M_AUDIENCE also accepts a JSON array of Auth0 audiences", async (
   const config = {...auth0Mode, LEGACY_M2M_AUDIENCE: '["https://other.example.test/", "https://m2m.example.test/"]'};
   assert.equal((await auth.createValidator(config).verify(token(auth0Claims))).kind, "service");
 });
+
+test("an empty LEGACY_M2M_AUDIENCE array is rejected instead of disabling the audience check", async () => {
+  for (const value of ["[]", "", " "]) {
+    assert.throws(() => auth.createValidator({...auth0Mode, LEGACY_M2M_AUDIENCE: value}), /LEGACY_M2M_AUDIENCE/);
+    assert.throws(() => auth.createValidator({...options, ...auth0Mode, USE_KEYCLOAK: "true",
+      KEYCLOAK_ISSUER: issuer, KEYCLOAK_AUDIENCE: "api", KEYCLOAK_TOKEN_URL: options.KEYCLOAK_TOKEN_URL,
+      LEGACY_M2M_AUDIENCE: value}), /LEGACY_M2M_AUDIENCE/);
+  }
+});
+
+test("Auth0 provider ignores AUTH_SCOPE, AUTH_PROVIDER and AUTH_CONTENT_TYPE from the environment", async () => {
+  const saved = {...process.env};
+  Object.assign(process.env, {AUTH_SCOPE: "env:scope", AUTH_PROVIDER: "env-provider", AUTH_CONTENT_TYPE: "env-type"});
+  try {
+    nock("https://proxy.example.test").post("/token", body => body.scope === undefined &&
+      body.provider === undefined && body.content_type === undefined).reply(200, {access_token: token(auth0Claims)});
+    const settings = {USE_KEYCLOAK: "false", AUTH0_URL: "https://tenant.example.test/oauth/token",
+      AUTH0_AUDIENCE: "https://m2m.example.test/", AUTH0_PROXY_SERVER_URL: "https://proxy.example.test/token"};
+    const provider = auth.m2m(settings);
+    assert.equal(typeof await provider.getMachineToken("auth0-client-env", "test-only-env"), "string");
+    nock("https://proxy.example.test").post("/token", body => body.scope === "read:a" &&
+      body.provider === "p" && body.content_type === "c").reply(200, {access_token: token(auth0Claims)});
+    const explicit = auth.m2m({...settings, AUTH_SCOPE: "read:a", AUTH_PROVIDER: "p", AUTH_CONTENT_TYPE: "c"});
+    assert.equal(typeof await explicit.getMachineToken("auth0-client-options", "test-only-options"), "string");
+    explicit.clearCache();
+  } finally {
+    for (const name of ["AUTH_SCOPE", "AUTH_PROVIDER", "AUTH_CONTENT_TYPE"]) {
+      if (saved[name] === undefined) delete process.env[name]; else process.env[name] = saved[name];
+    }
+  }
+});

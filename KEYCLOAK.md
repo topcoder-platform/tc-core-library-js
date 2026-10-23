@@ -17,7 +17,9 @@ The value is case-insensitive. Any value other than `true`/`false` throws at sta
 so a typo cannot silently pick a provider. To roll back, set `USE_KEYCLOAK=false` and
 restart the service; no code or dependency change is needed. Each mode keeps accepting
 the other provider's machine tokens (while the settings above are present), so services
-can be switched one at a time without rejecting callers that have not switched yet.
+can be switched one at a time without rejecting callers that have not switched yet. When
+the flag comes from a shared parameter, a per-service value (for example the service's own
+appvar copy, which wins over `global-appvar` in CI deploys) switches just that service.
 Member-token validation is the same in both modes.
 
 Services that need provider-specific settings use the same rule through
@@ -38,7 +40,8 @@ With `USE_KEYCLOAK` unset or `false`, `auth.m2m` returns the 3.x Auth0 provider:
 
 - `AUTH0_URL` is the tenant token URL, forwarded as `auth0_url`.
 - `AUTH0_PROXY_SERVER_URL` receives the request (default `AUTH0_URL`).
-- `AUTH0_AUDIENCE` and optional `AUTH_SCOPE`, `AUTH_PROVIDER` and `AUTH_CONTENT_TYPE` are forwarded.
+- `AUTH0_AUDIENCE` is forwarded. Optional `AUTH_SCOPE`, `AUTH_PROVIDER` and `AUTH_CONTENT_TYPE`
+  are forwarded only when passed as options (as in 3.x); environment values are ignored.
 - `getMachineToken()` defaults to `AUTH0_CLIENT_ID`/`AUTH0_CLIENT_SECRET`.
 
 Missing Auth0 settings reject when a token is requested, not at startup. Tokens are
@@ -77,7 +80,8 @@ validation. This compatibility exception never applies to machine tokens.
 
 `LEGACY_M2M_ISSUERS` (a subset of `VALID_ISSUERS`) and `LEGACY_M2M_AUDIENCE` allow
 RS256 Auth0 machine validation through the same normalizer. `LEGACY_M2M_AUDIENCE` is
-one audience or a JSON string array. In Keycloak mode they are an overlap window and
+one audience or a non-empty JSON string array; an empty value is rejected at startup, so
+machine tokens are never accepted without an audience check. In Keycloak mode they are an overlap window and
 do not enable Auth0 issuance; omit them to reject Auth0 machines once all calling
 workloads and cached tokens have migrated. In Auth0 mode they are the machine trust.
 Auth0 tenants contain scope names with stray whitespace (DEV has a trailing tab on
