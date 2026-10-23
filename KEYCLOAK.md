@@ -1,19 +1,55 @@
 # Keycloak M2M prerelease
 
-Version `4.0.0-keycloak.0` is confined to `keycloak_m2M`. Do not publish it as npm
+Version `4.0.0-keycloak.1` is confined to `keycloak_m2M`. Do not publish it as npm
 `latest` or replace `master`. Pin its reviewed Git commit in each opted-in service.
 Unmigrated Auth0 services keep their current dependency and deployment configuration.
 
-All public authentication factories require `M2M_PROVIDER=keycloak` and explicit
-`KEYCLOAK_ISSUER`, `KEYCLOAK_AUDIENCE`, and `KEYCLOAK_TOKEN_URL` settings. Missing
-settings fail at initialization. Token generation never falls back to Auth0.
+## Choosing the provider: `USE_KEYCLOAK`
+
+`USE_KEYCLOAK` selects the M2M provider for every factory in this library:
+
+| `USE_KEYCLOAK` | Token issuance (`auth.m2m`) | Machine tokens accepted |
+| --- | --- | --- |
+| `true` | Keycloak, using `KEYCLOAK_*` | Keycloak; Auth0 too while `LEGACY_M2M_*` is set |
+| `false`, empty or unset | Auth0 through `AUTH0_*`, exactly as 3.x | Auth0 via `LEGACY_M2M_*`; Keycloak too while `KEYCLOAK_ISSUER` and `KEYCLOAK_AUDIENCE` are set |
+
+The value is case-insensitive. Any value other than `true`/`false` throws at startup,
+so a typo cannot silently pick a provider. To roll back, set `USE_KEYCLOAK=false` and
+restart the service; no code or dependency change is needed. Each mode keeps accepting
+the other provider's machine tokens (while the settings above are present), so services
+can be switched one at a time without rejecting callers that have not switched yet.
+Member-token validation is the same in both modes.
+
+Services that need provider-specific settings use the same rule through
+`auth.useKeycloak(options?)`, and pass `auth.wrapperSettings(options?)` to
+`tc-bus-api-wrapper`, which expects `AUTH0_*` option names in both modes.
+
+## Keycloak mode
+
+With `USE_KEYCLOAK=true`, `KEYCLOAK_ISSUER`, `KEYCLOAK_AUDIENCE` and `KEYCLOAK_TOKEN_URL`
+are required. Missing settings fail at initialization. Keycloak token generation never
+retries against Auth0; switching providers is always the explicit `USE_KEYCLOAK` change.
 `KEYCLOAK_JWKS_URL` defaults to the configured realm's `/protocol/openid-connect/certs`.
 All URLs must be HTTPS and are deployment configuration, never token-derived URLs.
+
+## Auth0 mode
+
+With `USE_KEYCLOAK` unset or `false`, `auth.m2m` returns the 3.x Auth0 provider:
+
+- `AUTH0_URL` is the tenant token URL, forwarded as `auth0_url`.
+- `AUTH0_PROXY_SERVER_URL` receives the request (default `AUTH0_URL`).
+- `AUTH0_AUDIENCE` and optional `AUTH_SCOPE`, `AUTH_PROVIDER` and `AUTH_CONTENT_TYPE` are forwarded.
+- `getMachineToken()` defaults to `AUTH0_CLIENT_ID`/`AUTH0_CLIENT_SECRET`.
+
+Missing Auth0 settings reject when a token is requested, not at startup. Tokens are
+cached per process until a minute before expiry, as in 3.x. Validation trusts Auth0
+machine tokens only through `LEGACY_M2M_ISSUERS` and `LEGACY_M2M_AUDIENCE`; without them
+only member tokens (and Keycloak machine tokens, if configured) are accepted.
 
 ## Deployment configuration
 
 ```dotenv
-M2M_PROVIDER=keycloak
+USE_KEYCLOAK=true
 KEYCLOAK_ISSUER=https://keycloak.topcoder-dev.com/realms/topcoder-m2m-dev
 KEYCLOAK_AUDIENCE=https://api.topcoder-dev.com
 KEYCLOAK_TOKEN_URL=https://keycloak.topcoder-dev.com/m2m/token
@@ -39,10 +75,14 @@ member tokens have no stable audience contract, explicitly set
 `ALLOW_LEGACY_USER_AUDIENCE=true` while retaining issuer/signature/expiry/member-ID
 validation. This compatibility exception never applies to machine tokens.
 
-For a deliberate overlap window, `LEGACY_M2M_ISSUERS` (a subset of `VALID_ISSUERS`)
-and `LEGACY_M2M_AUDIENCE` allow RS256 Auth0 machine validation through the same
-normalizer. This does not enable Auth0 issuance. Omit them to reject Auth0 machines.
-Remove overlap only after all calling workloads and cached tokens have migrated.
+`LEGACY_M2M_ISSUERS` (a subset of `VALID_ISSUERS`) and `LEGACY_M2M_AUDIENCE` allow
+RS256 Auth0 machine validation through the same normalizer. `LEGACY_M2M_AUDIENCE` is
+one audience or a JSON string array. In Keycloak mode they are an overlap window and
+do not enable Auth0 issuance; omit them to reject Auth0 machines once all calling
+workloads and cached tokens have migrated. In Auth0 mode they are the machine trust.
+Auth0 tenants contain scope names with stray whitespace (DEV has a trailing tab on
+`all:achievement`), so Auth0 scope claims split on any whitespace. Keycloak scope
+claims keep the exact single-space rule.
 
 ## Shared API
 
@@ -54,10 +94,16 @@ Remove overlap only after all calling workloads and cached tokens have migrated.
 - `auth.hasScopes(principal, required, mode = 'all')` checks exact scopes for
   services only. Use `mode = 'any'` only when that endpoint's documented permission
   policy is OR. Empty/invalid requirements throw; this does not make a route public.
-- `auth.m2m(options?).getMachineToken(clientId?, secret?, scope?)` requests a
-  Keycloak token. Prefer no arguments and the explicit `KEYCLOAK_*` environment
-  credentials. Configuration options override the environment. Explicit credential
-  arguments remain available for wrappers, but must be Keycloak credentials.
+- `auth.m2m(options?).getMachineToken(clientId?, secret?, scope?)` requests a token
+  from the provider `USE_KEYCLOAK` selects. Prefer no arguments: the defaults are
+  `KEYCLOAK_CLIENT_ID`/`SECRET` in Keycloak mode and `AUTH0_CLIENT_ID`/`SECRET` in
+  Auth0 mode. Configuration options override the environment. Explicit credential
+  arguments remain available for wrappers and must belong to the active provider.
+- `auth.useKeycloak(options?)` returns the provider decision; it throws `TypeError`
+  for values other than `true`/`false`.
+- `auth.wrapperSettings(options?)` returns `AUTH0_URL`, `AUTH0_AUDIENCE`,
+  `AUTH0_PROXY_SERVER_URL`, `AUTH0_CLIENT_ID` and `AUTH0_CLIENT_SECRET` for the active
+  provider (the `KEYCLOAK_*` values in Keycloak mode), ready for `tc-bus-api-wrapper`.
 - `auth.verifier().validateToken(token, unusedLegacySecret, callback)` is a callback
   adapter to the same validator, not a separate implementation.
 
@@ -78,7 +124,7 @@ unknown-key lookup is rate-limited. Legacy user and machine policies remain
 separate. Legacy `lib/auth/*` and `lib/middleware/jwtAuthenticator` imports now delegate
 to this same implementation; they cannot select the former permissive policy.
 
-Each token provider has its own cache. HMAC cache keys isolate credentials and
+Each Keycloak token provider has its own cache. HMAC cache keys isolate credentials and
 canonical requested scopes; endpoints and audience are fixed for the provider.
 Concurrent misses share one request, credentials never appear in keys/logs,
 and tokens expire from the cache before their signed expiry. Responses are

@@ -6,12 +6,12 @@ const jwt = require("jsonwebtoken");
 const nock = require("nock");
 const {auth, middleware} = require("../..");
 const {configuration} = require("../../lib/keycloak/configuration");
-const {parseScopes} = require("../../lib/keycloak/principal");
+const {parseScopes, parseAuth0Scopes} = require("../../lib/keycloak/principal");
 const issuer = "https://keycloak.example.test/realms/m2m";
 const legacy = "https://auth.example.test/";
 const pair = generateKeyPairSync("rsa", {modulusLength: 2048});
 const other = generateKeyPairSync("rsa", {modulusLength: 2048});
-const options = {M2M_PROVIDER: "keycloak", KEYCLOAK_ISSUER: issuer,
+const options = {USE_KEYCLOAK: "true", KEYCLOAK_ISSUER: issuer,
   KEYCLOAK_AUDIENCE: "api", KEYCLOAK_TOKEN_URL: "https://proxy.example.test/token",
   VALID_ISSUERS: "[]", KEYCLOAK_CLIENT_ID: "client-a", KEYCLOAK_CLIENT_SECRET: "test-only-a"};
 
@@ -35,8 +35,8 @@ function keys(origin = issuer, key = pair.publicKey, kid = "key-1") {
 
 afterEach(() => { nock.cleanAll(); mock.restoreAll(); });
 
-test("requires explicit Keycloak deployment settings", () => {
-  for (const override of [{M2M_PROVIDER: "auth0"}, {KEYCLOAK_ISSUER: "http://untrusted"},
+test("requires explicit Keycloak deployment settings when USE_KEYCLOAK=true", () => {
+  for (const override of [{USE_KEYCLOAK: "yes"}, {KEYCLOAK_ISSUER: "http://untrusted"},
     {KEYCLOAK_AUDIENCE: ""}, {KEYCLOAK_TOKEN_URL: undefined}, {KEYCLOAK_ISSUER: issuer + "/"}]) {
     assert.throws(() => auth.createValidator({...options, ...override}), TypeError);
   }
@@ -174,4 +174,103 @@ test("scope parsing is exact, canonical and does not expand wildcards", () => {
   assert.deepEqual(parseScopes("write:groups  read:groups read:groups"), ["read:groups", "write:groups"]);
   assert.deepEqual(parseScopes("all:groups"), ["all:groups"]);
   assert.throws(() => parseScopes("read:groups\twrite:groups"));
+});
+
+const auth0Mode = {USE_KEYCLOAK: "false", KEYCLOAK_ISSUER: undefined, KEYCLOAK_AUDIENCE: undefined,
+  KEYCLOAK_TOKEN_URL: undefined, VALID_ISSUERS: JSON.stringify([legacy]), AUTH_USER_AUDIENCES: '["browser"]',
+  LEGACY_M2M_ISSUERS: JSON.stringify([legacy]), LEGACY_M2M_AUDIENCE: "https://m2m.example.test/"};
+const auth0Claims = {iss: legacy, aud: "https://m2m.example.test/", sub: "client-a@clients"};
+
+test("USE_KEYCLOAK selects the provider, defaults to Auth0 and rejects other values", () => {
+  for (const value of [true, "true", "TRUE", " true "]) assert.equal(auth.useKeycloak({USE_KEYCLOAK: value}), true);
+  for (const value of [undefined, "", "false", "False", false]) assert.equal(auth.useKeycloak({USE_KEYCLOAK: value}), false);
+  for (const value of ["yes", "1", "keycloak"]) assert.throws(() => auth.useKeycloak({USE_KEYCLOAK: value}), /USE_KEYCLOAK/);
+  assert.equal(configuration(auth0Mode).useKeycloak, false);
+  assert.equal(configuration(options).useKeycloak, true);
+});
+
+test("Auth0 mode needs no Keycloak settings and trusts Auth0 machines through LEGACY_M2M_*", async () => {
+  nock.disableNetConnect();
+  try {
+    keys(legacy);
+    const validator = auth.createValidator(auth0Mode);
+    const service = await validator.verify(token(auth0Claims));
+    assert.equal(service.kind, "service"); assert.equal(service.clientId, "client-a");
+    await assert.rejects(validator.verify(token()), {code: "invalid_token"});
+    keys(legacy);
+    await assert.rejects(auth.createValidator(auth0Mode).verify(token({...auth0Claims, aud: "api"})), {code: "invalid_token"});
+  } finally { nock.enableNetConnect(); }
+});
+
+test("Auth0 mode keeps accepting Keycloak machines while Keycloak issuer and audience are set", async () => {
+  keys();
+  const both = {...auth0Mode, KEYCLOAK_ISSUER: issuer, KEYCLOAK_AUDIENCE: "api"};
+  assert.equal((await auth.createValidator(both).verify(token())).kind, "service");
+  assert.equal(configuration(both).tokenUrl, undefined);
+});
+
+test("Auth0 machine scopes tolerate stray whitespace; Keycloak scopes stay exact", async () => {
+  assert.deepEqual(parseAuth0Scopes("read:groups\tall:achievement\t write:groups"),
+    ["all:achievement", "read:groups", "write:groups"]);
+  assert.throws(() => parseAuth0Scopes(" \t"), TypeError);
+  keys(legacy);
+  const service = await auth.createValidator(auth0Mode).verify(token({...auth0Claims, scope: "read:groups all:achievement\t"}));
+  assert.deepEqual(service.scopes, ["all:achievement", "read:groups"]);
+  keys();
+  await assert.rejects(auth.createValidator(options).verify(token({scope: "read:groups\twrite:groups"})), {code: "invalid_token"});
+});
+
+test("Auth0 provider sends the 3.x proxy request, caches per credentials and sanitizes errors", async () => {
+  const settings = {USE_KEYCLOAK: "false", AUTH0_URL: "https://tenant.example.test/oauth/token",
+    AUTH0_AUDIENCE: "https://m2m.example.test/", AUTH0_PROXY_SERVER_URL: "https://proxy.example.test/token",
+    AUTH0_CLIENT_ID: "auth0-client-cache", AUTH0_CLIENT_SECRET: "test-only-auth0"};
+  let requests = 0;
+  const proxy = nock("https://proxy.example.test").post("/token", body => {
+    requests += 1;
+    return body.grant_type === "client_credentials" && body.auth0_url === settings.AUTH0_URL &&
+      body.audience === settings.AUTH0_AUDIENCE && body.client_id === settings.AUTH0_CLIENT_ID &&
+      body.client_secret === settings.AUTH0_CLIENT_SECRET && body.scope === undefined;
+  }).reply(200, {access_token: token(auth0Claims)});
+  const provider = auth.m2m(settings);
+  const tokens = await Promise.all([provider.getMachineToken(), provider.getMachineToken()]);
+  assert.equal(tokens[0], tokens[1]); assert.equal(requests, 1); assert.ok(proxy.isDone());
+  assert.equal(await auth.m2m(settings).getMachineToken(), tokens[0]);
+  nock("https://proxy.example.test").post("/token").reply(200, {error: "access_denied"});
+  await assert.rejects(provider.getMachineToken("auth0-client-denied", "test-only-denied"), error =>
+    /Auth0 M2M token request failed/.test(error.message) && !error.message.includes("test-only-denied"));
+  nock("https://proxy.example.test").post("/token").reply(500, {});
+  await assert.rejects(provider.getMachineToken("auth0-client-error", "test-only-error"), /Auth0 M2M token request failed/);
+  provider.clearCache();
+});
+
+test("Auth0 provider defaults the proxy to AUTH0_URL and fails on use, not construction", async () => {
+  const provider = auth.m2m({USE_KEYCLOAK: "false", AUTH0_URL: undefined, AUTH0_PROXY_SERVER_URL: undefined,
+    AUTH0_CLIENT_ID: undefined, AUTH0_CLIENT_SECRET: undefined});
+  await assert.rejects(provider.getMachineToken(), TypeError);
+  await assert.rejects(provider.getMachineToken("auth0-client-x", "test-only-x"), /AUTH0_URL/);
+  nock("https://tenant.example.test").post("/oauth/token", body => body.client_id === "auth0-client-direct")
+    .reply(200, {access_token: token(auth0Claims)});
+  const direct = auth.m2m({USE_KEYCLOAK: "false", AUTH0_URL: "https://tenant.example.test/oauth/token",
+    AUTH0_PROXY_SERVER_URL: undefined, AUTH0_AUDIENCE: "https://m2m.example.test/"});
+  assert.equal(typeof await direct.getMachineToken("auth0-client-direct", "test-only-direct"), "string");
+  direct.clearCache();
+});
+
+test("wrapperSettings returns the active provider's settings under the wrapper's AUTH0_* names", () => {
+  const all = {AUTH0_URL: "https://tenant.example.test/oauth/token", AUTH0_AUDIENCE: "https://m2m.example.test/",
+    AUTH0_PROXY_SERVER_URL: "https://proxy.example.test/token", AUTH0_CLIENT_ID: "auth0-id", AUTH0_CLIENT_SECRET: "auth0-secret",
+    KEYCLOAK_TOKEN_URL: options.KEYCLOAK_TOKEN_URL, KEYCLOAK_AUDIENCE: "api",
+    KEYCLOAK_CLIENT_ID: "client-a", KEYCLOAK_CLIENT_SECRET: "test-only-a"};
+  assert.deepEqual(auth.wrapperSettings({...all, USE_KEYCLOAK: "true"}), {AUTH0_URL: options.KEYCLOAK_TOKEN_URL,
+    AUTH0_AUDIENCE: "api", AUTH0_PROXY_SERVER_URL: options.KEYCLOAK_TOKEN_URL,
+    AUTH0_CLIENT_ID: "client-a", AUTH0_CLIENT_SECRET: "test-only-a"});
+  assert.deepEqual(auth.wrapperSettings({...all, USE_KEYCLOAK: "false"}), {AUTH0_URL: all.AUTH0_URL,
+    AUTH0_AUDIENCE: all.AUTH0_AUDIENCE, AUTH0_PROXY_SERVER_URL: all.AUTH0_PROXY_SERVER_URL,
+    AUTH0_CLIENT_ID: "auth0-id", AUTH0_CLIENT_SECRET: "auth0-secret"});
+});
+
+test("LEGACY_M2M_AUDIENCE also accepts a JSON array of Auth0 audiences", async () => {
+  keys(legacy);
+  const config = {...auth0Mode, LEGACY_M2M_AUDIENCE: '["https://other.example.test/", "https://m2m.example.test/"]'};
+  assert.equal((await auth.createValidator(config).verify(token(auth0Claims))).kind, "service");
 });
