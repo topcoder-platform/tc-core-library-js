@@ -2,7 +2,7 @@
 
 Published [tc-core-library-js v4.0.0-rc.1](https://github.com/topcoder-platform/tc-core-library-js/releases/tag/v4.0.0-rc.1) from commit `6c326fea0abfccb5ae29dff2ac5bce01aabc1fa4` on `v6-refresh`. [Core draft PR #7](https://github.com/topcoder-platform/tc-core-library-js/pull/7) targets master. The release includes the package tarball, compiled CommonJS output and TypeScript declarations.
 
-All 28 requested services are committed on `v6-refresh`. The 26 services with configured remotes are pushed and have draft PRs targeting their development branches. Contact and QA are committed locally because their repositories have no configured remote. Original service checkouts and existing edits were preserved; migration worktrees are under `/home/jmgasper/Documents/Git/v6/_worktrees/v6-refresh/`.
+All 28 requested services are committed on `v6-refresh`. The 26 services with configured remotes are pushed and have migration PRs targeting their development branches. Contact and QA are committed locally because their repositories have no configured remote. Original service checkouts and existing edits were preserved; migration worktrees are under `/home/jmgasper/Documents/Git/v6/_worktrees/v6-refresh/`.
 
 ## Validation
 
@@ -14,7 +14,7 @@ All 28 requested services are committed on `v6-refresh`. The 26 services with co
 
 ## Deployment status
 
-The branches and draft PRs are ready for development review; they have not been merged or deployed. Configure trusted issuers, RSA audiences and HMAC secrets of at least 32 bytes as described in [MIGRATION.md](MIGRATION.md). Autopilot's local login also requires explicit credentials. Development smoke tests should cover real human and machine tokens, the active-session check and representative published events.
+Challenge migration [#168](https://github.com/topcoder-platform/challenge-api-v6/pull/168) and its production Docker fix [#169](https://github.com/topcoder-platform/challenge-api-v6/pull/169) have been merged. The other 25 service migration PRs remain open for development review as of the 2026-10-27 audit. Deployment smoke testing is still required. Configure trusted issuers, RSA audiences and HMAC secrets of at least 32 bytes as described in [MIGRATION.md](MIGRATION.md). Autopilot's local login also requires explicit credentials. Development smoke tests should cover real human and machine tokens, the active-session check and representative published events.
 
 The GitHub release is published. npm version `4.0.0-rc.1` was not available when checked, and this workstation has no npm publishing credentials. CircleCI is configured to publish tagged prereleases using its existing `NPM_TOKEN`; all service branches use the GitHub release and do not depend on npm publication.
 
@@ -24,7 +24,7 @@ The old bus wrapper repository has not been archived. Archive it after developme
 
 Every row passed lint and build. Test counts are the focused suites run for this migration, not a claim that the entire service test suite was run.
 
-| Service | Development base | Commit | Draft PR | Targeted tests passed |
+| Service | Development base | Migration commit | Migration PR | Targeted tests passed |
 | --- | --- | --- | --- | --- |
 | autopilot-v6 | develop | [cd55cc5d2](https://github.com/topcoder-platform/autopilot-v6/commit/cd55cc5d2abf8e8f18bdb2834df3112934de1b41) | [#72](https://github.com/topcoder-platform/autopilot-v6/pull/72) | 2 |
 | av-scanner-v6 | develop | [3fa1e5a9f](https://github.com/topcoder-platform/av-scanner-v6/commit/3fa1e5a9f03141bf5ca7067712b7b2713dca1131) | [#7](https://github.com/topcoder-platform/av-scanner-v6/pull/7) | 92 |
@@ -54,3 +54,34 @@ Every row passed lint and build. Test counts are the focused suites run for this
 | status-api-v6 | develop | [e65bf4ba3](https://github.com/topcoder-platform/status-api-v6/commit/e65bf4ba3c8e32aff4a15cda0524e1d112ec61f4) | [#4](https://github.com/topcoder-platform/status-api-v6/pull/4) | 20 |
 | support-api-v6 | develop | [241127f6a](https://github.com/topcoder-platform/support-api-v6/commit/241127f6af4a882fcd930fc670c5b364b90bde88) | [#18](https://github.com/topcoder-platform/support-api-v6/pull/18) | 13 |
 | tc-finance-api | dev | [d262ae673](https://github.com/topcoder-platform/tc-finance-api/commit/d262ae673a4b46d5bc9a902eaf279cffe50c9414) | [#210](https://github.com/topcoder-platform/tc-finance-api/pull/210) | 11 |
+
+## Alpine Node package audit (2026-10-27)
+
+Audited all 25 remaining service migration PRs, the core build configuration, and secondary Dockerfiles after Challenge's deployment failed to find `nodejs-current=26.5.1-r0`. Fourteen service PRs contained the same obsolete pin; their existing `v6-refresh` branches now include the fixes below. Autopilot had both production and development images affected.
+
+Affected Alpine runtime stages now use `nodejs-current~${NODE_VERSION%%.*}` and assert the installed Node major during the build. This preserves Alpine's dynamically linked runtime and system OpenSSL updates while accepting maintained Node patch packages. Official Node build stages retain their configured version; pnpm build arguments are explicitly declared where consumed. The verified Alpine runtime version was 26.12.1.
+
+| Service | Updated PR | Docker fix commit | Images built |
+| --- | --- | --- | --- |
+| autopilot-v6 | [#72](https://github.com/topcoder-platform/autopilot-v6/pull/72) | [855e053b7](https://github.com/topcoder-platform/autopilot-v6/commit/855e053b79318ddd748f37221148ff0e08ce01a8) | `Dockerfile`, `Dockerfile.dev` |
+| av-scanner-v6 | [#7](https://github.com/topcoder-platform/av-scanner-v6/pull/7) | [a90ea0db2](https://github.com/topcoder-platform/av-scanner-v6/commit/a90ea0db280def9058e64ef904f027b334d82f4e) | `Dockerfile` |
+| billing-accounts-api-v6 | [#32](https://github.com/topcoder-platform/billing-accounts-api-v6/pull/32) | [a447aae45](https://github.com/topcoder-platform/billing-accounts-api-v6/commit/a447aae45ad94962f33d937b348a53f4dd050b4a) | `Dockerfile` |
+| email-service-v6 | [#6](https://github.com/topcoder-platform/email-service-v6/pull/6) | [9b9d27f76](https://github.com/topcoder-platform/email-service-v6/commit/9b9d27f76d9f9a8a82578eb5411cb2eb3221e9d5) | `Dockerfile` |
+| engagements-api-v6 | [#86](https://github.com/topcoder-platform/engagements-api-v6/pull/86) | [f5aa93af2](https://github.com/topcoder-platform/engagements-api-v6/commit/f5aa93af2217289306a333553e7fb4045ee1a8c8) | `Dockerfile` |
+| forums-api-v6 | [#24](https://github.com/topcoder-platform/forums-api-v6/pull/24) | [6ae0a8fdb](https://github.com/topcoder-platform/forums-api-v6/commit/6ae0a8fdb2161d47eab249024538c62df5cc8962) | `Dockerfile` |
+| identity-api-v6 | [#54](https://github.com/topcoder-platform/identity-api-v6/pull/54) | [53394ca54](https://github.com/topcoder-platform/identity-api-v6/commit/53394ca548a3bb527be6ebd42ca81907fd905ff3) | `Dockerfile` |
+| lookups-api-v6 | [#10](https://github.com/topcoder-platform/lookups-api-v6/pull/10) | [f8b13956b](https://github.com/topcoder-platform/lookups-api-v6/commit/f8b13956b2f854fe5cc82a19ccc72bde33ef5a1d) | `Dockerfile` |
+| marathon-match-api-v6 | [#450](https://github.com/topcoder-platform/marathon-match-api-v6/pull/450) | [c2bb5c21d](https://github.com/topcoder-platform/marathon-match-api-v6/commit/c2bb5c21d8d6944152d6292ce1920502a212d2d8) | `Dockerfile` |
+| procurement-api-v6 | [#5](https://github.com/topcoder-platform/procurement-api-v6/pull/5) | [10a0069b7](https://github.com/topcoder-platform/procurement-api-v6/commit/10a0069b768766f3bd7e3b44fbeed2f31f3619ca) | `Dockerfile` |
+| projects-api-v6 | [#59](https://github.com/topcoder-platform/projects-api-v6/pull/59) | [eb9abcd1c](https://github.com/topcoder-platform/projects-api-v6/commit/eb9abcd1c263b82c57712c1567259ba6993441ce) | `Dockerfile` |
+| resource-api-v6 | [#35](https://github.com/topcoder-platform/resource-api-v6/pull/35) | [bd0f6cffd](https://github.com/topcoder-platform/resource-api-v6/commit/bd0f6cffda9e50acbb6cb578b6f613b9c06fda60) | `docker/Dockerfile` |
+| review-api-v6 | [#375](https://github.com/topcoder-platform/review-api-v6/pull/375) | [c8026e996](https://github.com/topcoder-platform/review-api-v6/commit/c8026e996d46d6f803c101eeee2bdd1ad5841fe8) | `Dockerfile` |
+| status-api-v6 | [#4](https://github.com/topcoder-platform/status-api-v6/pull/4) | [02f50cf81](https://github.com/topcoder-platform/status-api-v6/commit/02f50cf81e58e55951d4c1b806d217bfc134090f) | `Dockerfile` |
+
+All 14 projects passed lint and build using their project `nvm use`. All 15 affected images completed full Docker builds. Offline checks verified non-root UID 10001, all four shared core factories, acceptance of a valid JWT, and rejection of an invalid signature. Docker builds used `--network=host` because this workstation's Docker bridge DNS could not resolve package hosts.
+
+Status's Docker build additionally exposed an HTTP test fixture that still injected keys into the verifier removed by the migration. The fixture now supplies public keys to the shared verifier while retaining actual JWT signature and claims validation. All 201 unit tests and 13 end-to-end tests pass, including an added untrusted-key rejection check.
+
+Challenge's secondary mock image is fixed separately in [#170](https://github.com/topcoder-platform/challenge-api-v6/pull/170), commit [603bd07](https://github.com/topcoder-platform/challenge-api-v6/commit/603bd07). Like its already merged production fix, the mock copies the exact Node 26.5.1 binary from the matching official Node/Alpine image. Root and mock lint/build checks, the full mock image build, and the same offline runtime checks all pass. This brings the follow-up validation to 16 changed images.
+
+No obsolete Node APK pin was present in Bus, Forms, Forms Processor, Groups, Leave, Member, Opportunities, Reports, Support, Standardized Skills, or Finance. Reports already used a compatible Node major constraint. The core build and local-only Contact/QA repositories also have no such pin. These checks cover the package-resolution failure; development integration smoke tests remain part of rollout.
