@@ -14,7 +14,7 @@ All 28 requested services are committed on `v6-refresh`. The 26 services with co
 
 ## Deployment status
 
-Challenge migration [#168](https://github.com/topcoder-platform/challenge-api-v6/pull/168) and its production Docker fix [#169](https://github.com/topcoder-platform/challenge-api-v6/pull/169) have been merged. The other 25 service migration PRs remain open for development review as of the 2026-10-27 audit. Deployment smoke testing is still required. Configure trusted issuers, RSA audiences and HMAC secrets of at least 32 bytes as described in [MIGRATION.md](MIGRATION.md). Autopilot's local login also requires explicit credentials. Development smoke tests should cover real human and machine tokens, the active-session check and representative published events.
+Challenge migration [#168](https://github.com/topcoder-platform/challenge-api-v6/pull/168) was reverted by [#171](https://github.com/topcoder-platform/challenge-api-v6/pull/171). Replacement [#172](https://github.com/topcoder-platform/challenge-api-v6/pull/172) restores it with corrected JWT configuration; the merged production/mock Docker fixes are retained. The other service migration PRs remain open for development review. Deployment smoke testing is still required. Configure trusted issuers, RSA audiences and HMAC secrets of at least 32 bytes as described in [MIGRATION.md](MIGRATION.md). Autopilot's local login also requires explicit credentials. Development smoke tests should cover real human and machine tokens, the active-session check and representative published events.
 
 The GitHub release is published. npm version `4.0.0-rc.1` was not available when checked, and this workstation has no npm publishing credentials. CircleCI is configured to publish tagged prereleases using its existing `NPM_TOKEN`; all service branches use the GitHub release and do not depend on npm publication.
 
@@ -85,3 +85,48 @@ Status's Docker build additionally exposed an HTTP test fixture that still injec
 Challenge's secondary mock image is fixed separately in [#170](https://github.com/topcoder-platform/challenge-api-v6/pull/170), commit [603bd07](https://github.com/topcoder-platform/challenge-api-v6/commit/603bd07). Like its already merged production fix, the mock copies the exact Node 26.5.1 binary from the matching official Node/Alpine image. Root and mock lint/build checks, the full mock image build, and the same offline runtime checks all pass. This brings the follow-up validation to 16 changed images.
 
 No obsolete Node APK pin was present in Bus, Forms, Forms Processor, Groups, Leave, Member, Opportunities, Reports, Support, Standardized Skills, or Finance. Reports already used a compatible Node major constraint. The core build and local-only Contact/QA repositories also have no such pin. These checks cover the package-resolution failure; development integration smoke tests remain part of rollout.
+
+## JWT configuration follow-up (2026-10-28)
+
+Corrected missing browser/API audience forwarding and inconsistent configuration
+selection in nine service branches. The core package APIs and immutable release
+remain unchanged. Challenge uses a fresh branch from current `develop` because
+the original migration was reverted; the other eight existing PRs were updated.
+
+| Service | PR | Configuration fix commit |
+| --- | --- | --- |
+| challenge-api-v6 | [#172](https://github.com/topcoder-platform/challenge-api-v6/pull/172) | [15e729e](https://github.com/topcoder-platform/challenge-api-v6/commit/15e729e) |
+| member-api-v6 | [#168](https://github.com/topcoder-platform/member-api-v6/pull/168) | [87c9fc955](https://github.com/topcoder-platform/member-api-v6/commit/87c9fc95574e06ffed1ae93bfd7e2b5706f0ea5c) |
+| resource-api-v6 | [#35](https://github.com/topcoder-platform/resource-api-v6/pull/35) | [81e1ef5e1](https://github.com/topcoder-platform/resource-api-v6/commit/81e1ef5e198340075e5c0f162a6c9ab200c69553) |
+| review-api-v6 | [#375](https://github.com/topcoder-platform/review-api-v6/pull/375) | [eec9584c4](https://github.com/topcoder-platform/review-api-v6/commit/eec9584c483ef8ec0860114527e1555e7bba25bc) |
+| marathon-match-api-v6 | [#450](https://github.com/topcoder-platform/marathon-match-api-v6/pull/450) | [a0e9da26d](https://github.com/topcoder-platform/marathon-match-api-v6/commit/a0e9da26d22cdca2186d6e00caac695e252d54de) |
+| autopilot-v6 | [#72](https://github.com/topcoder-platform/autopilot-v6/pull/72) | [b558af2b5](https://github.com/topcoder-platform/autopilot-v6/commit/b558af2b5294422575df6c710d18049847ea4417) |
+| identity-api-v6 | [#54](https://github.com/topcoder-platform/identity-api-v6/pull/54) | [567ec6cb2](https://github.com/topcoder-platform/identity-api-v6/commit/567ec6cb26b6674fdbd64ebd18df007a7ca9f353) |
+| tc-finance-api | [#210](https://github.com/topcoder-platform/tc-finance-api/pull/210) | [d54093062](https://github.com/topcoder-platform/tc-finance-api/commit/d540930622d63768525c26fd7cf6cfb4b4a4d1e2) |
+| standardized-skills-api | [#137](https://github.com/topcoder-platform/standardized-skills-api/pull/137) | [329ea70b0](https://github.com/topcoder-platform/standardized-skills-api/commit/329ea70b0f7d9b39c1a9d086f873af7bd7e69b96) |
+
+All nine changed services pass lint/build using their project Node versions.
+Sixty-eight focused tests pass, including real RSA browser and M2M tokens, legacy
+HMAC human tokens, untrusted audiences/signatures, Identity cache separation,
+Autopilot local-token issuance, and Challenge route/bus behavior. Challenge's
+optional-authentication rejection now continues promptly instead of waiting for
+its fallback timeout. Challenge and Finance additionally pass complete Docker
+builds and offline checks of their compiled middleware as non-root users.
+
+Development Parameter Store in `us-east-1` was updated and read back successfully:
+
+| Parameter | Result |
+| --- | --- |
+| `/config/common/global-appvar/JWT_AUDIENCE` | Created SecureString, version 1, value `BXWXUWnilVUPdN01t2Se29Tw2ZYNGZvH` |
+| `/config/identity-api-v6/appvar/VALID_ISSUERS` | Version 2, aligned with existing global allowlist |
+| `/config/identity-api-v6/appvar/JWT_AUDIENCE` | Version 2, aligned with global browser audience |
+| `/config/standardized-skills-api/appvar/VALID_ISSUERS` | Version 2, aligned with existing global allowlist |
+
+The existing global `AUTH_SECRET`, `AUTH0_AUDIENCE` and `VALID_ISSUERS` were verified
+and retained. Status's dedicated signing-key value matches the global key, and
+its machine audience and browser configuration use the same dev values. Both
+active dev Auth0 JWKS endpoints respond successfully. No signing-key rotation was
+performed; outbound client credentials and Status's exact machine-client allowlist
+were retained. The shared configuration takes effect on subsequent deployments.
+See [MIGRATION.md](MIGRATION.md#shared-development-configuration) for the settings
+and the purpose-specific Status/Autopilot exceptions.

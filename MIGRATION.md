@@ -27,6 +27,39 @@ No scoped service uses the old library logger, logging middleware, response util
 - Autopilot's local login now requires explicit `LOCAL_AUTH_USERNAME` and a `LOCAL_AUTH_PASSWORD` of at least 32 characters; its access tokens are audience/issuer-bound and verified by this library. Its hard-coded default administrator login has been removed.
 - Identity caches database permissions only; current-token scopes and machine classification cannot be replaced by a cached identity.
 
+## Shared development configuration
+
+The JWT configuration follow-up uses `/config/common/global-appvar` in development:
+
+| Key | Development value |
+| --- | --- |
+| `VALID_ISSUERS` | Existing shared exact issuer allowlist; JSON arrays and comma-separated lists are accepted |
+| `AUTH_SECRET` | Existing shared signing key, at least 32 UTF-8 bytes; never create a different key per service |
+| `JWT_AUDIENCE` | `BXWXUWnilVUPdN01t2Se29Tw2ZYNGZvH` (Platform UI browser client) |
+| `AUTH0_AUDIENCE` | `https://m2m.topcoder-dev.com/` (machine/API audience) |
+
+All four global parameters are SecureStrings. On 2026-10-28 the missing browser
+audience was added, Identity's issuer/audience overrides were aligned, and
+Standardized Skills' issuer override was aligned. The shared signing key and
+machine audience were retained. Finance and Standardized Skills deployment jobs
+now include the common appvar path. Parameter Store updates are loaded on the
+next deployment/task startup, not by already running tasks.
+
+Challenge, Member and Resource now pass both audiences and reuse one route
+authenticator/JWKS cache. Review and Marathon pass the separate browser audience.
+Identity's Passport strategy now consumes the same four common settings as its
+middleware; `JWT_VALIDATION_MODE`, `JWT_ISSUER_URL` and `JWT_JWKS_URI` no longer
+select an independent access-token policy. Internal purpose-bound signing keys
+remain separate. Finance also uses the common settings, including the browser
+custom-domain issuer; its outbound OAuth configuration remains service-specific.
+
+Status retains its explicit issuer policies, dedicated task configuration and
+machine-client allowlist. Its dev signing key and browser/machine audiences match
+the shared values; its stricter route authorization remains unchanged. Autopilot's
+local login maps `jwt.secret` to shared `AUTH_SECRET` and retains the purpose-bound
+issuer/audience `autopilot-v6`. Local login requires explicit credentials and its
+tokens are not trusted as Platform access tokens by the other services.
+
 ## Rollout
 
 The release is a prerelease for dev/develop testing. Services use an immutable GitHub release reference; the versioned `dist` directory makes Git installs usable without build hooks. CircleCI publishes the same version to npm's `next` tag when its existing `NPM_TOKEN` is configured. Do not archive the old wrapper until migrated services have passed deployment smoke tests and any out-of-scope consumers have been reviewed.
