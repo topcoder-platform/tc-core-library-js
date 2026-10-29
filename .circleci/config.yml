@@ -1,53 +1,38 @@
-# Javascript Node CircleCI 2.0 configuration file
-#
-# Check https://circleci.com/docs/2.0/language-javascript/ for more details
-#
-version: 2
-
-defaults: &defaults
-  working_directory: ~/repo
-  docker:
-    - image: circleci/node:10.22.1
-
+version: 2.1
 jobs:
   test:
-    <<: *defaults
+    docker:
+      - image: node:22-bookworm
     steps:
       - checkout
-
-      - restore_cache:
-          keys:
-          - v1-dependencies-
-            # fallback to using the latest cache if no exact match is found
-          - v1-dependencies-
-
-      - run: npm install
-      - run:
-          name: Run tests
-          command: npm test
-
-      - save_cache:
-          paths:
-            - node_modules
-          key: v1-dependencies-
-
+      - run: corepack enable && corepack prepare pnpm@10.28.0 --activate
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint && pnpm build && pnpm test
+      - run: pnpm audit --prod
+      - run: git diff --exit-code -- dist
       - persist_to_workspace:
-          root: ~/repo
-          paths: .
+          root: .
+          paths: ["."]
   deploy:
-    <<: *defaults
+    docker:
+      - image: node:22-bookworm
     steps:
       - attach_workspace:
-          at: ~/repo
+          at: .
+      - run: corepack enable && corepack prepare pnpm@10.28.0 --activate
       - run:
-          name: Authenticate with registry
-          command: echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/repo/.npmrc
-      - run:
-          name: Publish package
-          command: npm publish
-
+          name: Publish the tagged package
+          command: |
+            test -n "$NPM_TOKEN"
+            printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > ~/.npmrc
+            trap 'rm -f ~/.npmrc' EXIT
+            version="$(node -p "require('./package.json').version")"
+            test "$CIRCLE_TAG" = "v$version"
+            case "$version" in
+              *-*) npm publish --tag next ;;
+              *) npm publish --tag latest ;;
+            esac
 workflows:
-  version: 2
   test-deploy:
     jobs:
       - test:
@@ -55,8 +40,7 @@ workflows:
             tags:
               only: /^v.*/
       - deploy:
-          requires:
-            - test
+          requires: [test]
           filters:
             tags:
               only: /^v.*/

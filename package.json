@@ -1,43 +1,46 @@
 {
   "name": "tc-core-library-js",
-  "version": "3.0.1",
-  "description": "Topcoder Core library for express based microservices",
-  "main": "index.js",
-  "author": "Parth Shah",
+  "version": "4.0.0-rc.1",
+  "description": "Shared Topcoder JWT verification, machine authentication and Bus API publishing",
   "license": "ISC",
-  "devDependencies": {
-    "chai": "^4.2.0",
-    "chai-as-promised": "^7.1.1",
-    "mocha": "^11.7.5"
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "MIGRATION.md"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
+  "packageManager": "pnpm@10.28.0",
+  "scripts": {
+    "lint": "eslint src test",
+    "build": "tsc -p tsconfig.json",
+    "test": "pnpm build && node --test test/*.test.cjs",
+    "prepack": "pnpm build"
   },
   "dependencies": {
-    "axios": "^0.30.2",
-    "bunyan": "^1.8.12",
-    "jsonwebtoken": "^9.0.2",
+    "jsonwebtoken": "^9.0.3",
     "jwks-rsa": "^3.2.0",
-    "lodash": "^4.17.15",
-    "millisecond": "^0.1.2",
-    "r7insight_node": "^2.1.0"
+    "@types/jsonwebtoken": "^9.0.10"
   },
-  "overrides": {
-    "axios": "^0.30.2"
-  },
-  "engines": {
-    "node": ">= 14"
-  },
-  "scripts": {
-    "test": "SUPPRESS_NO_CONFIG_WARNING=1 ENVIRONMENT=test ./node_modules/.bin/mocha $(find . -path '*spec.js' -not -path './node_modules/*')"
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.19.0",
+    "bluebird": "^3.7.2",
+    "eslint": "^10.13.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.46.0"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/appirio-tech/tc-core-library-js.git"
-  },
-  "keywords": [
-    "express",
-    "topcoder"
-  ],
-  "bugs": {
-    "url": "https://github.com/appirio-tech/tc-core-library-js/issues"
-  },
-  "homepage": "https://github.com/appirio-tech/tc-core-library-js#readme"
+    "url": "git+https://github.com/topcoder-platform/tc-core-library-js.git"
+  }
 }
