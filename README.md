@@ -61,7 +61,7 @@ const token = await tokens.getMachineToken(clientId, clientSecret);
 
 Clients isolate their configuration and credential caches. Concurrent requests for the same credentials share one token request. Cache lifetime is the minimum of `expires_in`, JWT `exp` when present, the configured maximum and 24 hours, with a 60-second refresh margin. Missing expiration does not produce an indefinitely cached token. `clearCache()` invalidates cached tokens. Proxy requests include the configured `auth0_url`; direct OAuth requests omit that proxy field. Optional `AUTH_SCOPE`, `AUTH_PROVIDER` and `AUTH_CONTENT_TYPE` retain the deployed proxy contract.
 
-Requests have a 10-second default timeout, reject redirects, limit responses to 1 MiB and never include credentials or response bodies in thrown errors. `timeoutMs` and an injectable `fetch` support service-specific deadlines and isolated tests.
+Requests have a 10-second default timeout, reject redirects, limit responses to 1 MiB and never include credentials or response bodies in thrown errors. The default transport uses Node's HTTP/HTTPS clients and works when a host application replaces `global.Promise` with Bluebird, including on Node 26. It does not modify the host's Promise implementation. `timeoutMs` and an injectable `fetch` support service-specific deadlines and isolated tests; an injected transport is responsible for compatibility with its host runtime. Bus API publishing uses the same transport.
 
 ## Bus API publishing
 

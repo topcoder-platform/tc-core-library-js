@@ -3,6 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.HttpError = void 0;
 exports.endpoint = endpoint;
 exports.postJson = postJson;
+const node_http_1 = require("node:http");
+const node_https_1 = require("node:https");
 /** Safe operational failure without response bodies, URLs, tokens or credentials. */
 class HttpError extends Error {
     status;
@@ -35,7 +37,52 @@ function endpoint(value, allowHttp = false) {
     }
     return url;
 }
+/** Sends JSON through Node's HTTP clients without depending on global fetch or native Promise extensions.
+ * @param url Validated endpoint. @param body Serialized JSON payload. @param headers Request headers.
+ * @param signal Combined request and caller deadline, including response-body consumption.
+ * @returns Status and parsed JSON body. @throws HttpError or a transport/JSON error for the caller to sanitize.
+ */
+function postWithNodeHttp(url, body, headers, signal) {
+    return new Promise((resolve, reject) => {
+        const request = (new URL(url).protocol === 'https:' ? node_https_1.request : node_http_1.request)(url, {
+            method: 'POST', signal,
+            headers: { ...headers, ...(body === undefined ? {} : { 'Content-Length': Buffer.byteLength(body) }) },
+        }, response => {
+            response.on('error', reject);
+            const status = response.statusCode ?? 0;
+            if (status < 200 || status >= 300) {
+                response.destroy();
+                reject(new HttpError('Request rejected', status));
+                return;
+            }
+            const chunks = [];
+            let size = 0;
+            response.on('data', (chunk) => {
+                size += chunk.length;
+                if (size > 1024 * 1024) {
+                    reject(new HttpError('Response too large'));
+                    response.destroy();
+                    return;
+                }
+                chunks.push(chunk);
+            });
+            response.on('end', () => {
+                try {
+                    const text = Buffer.concat(chunks).toString('utf8');
+                    resolve({ status, body: text ? JSON.parse(text) : undefined });
+                }
+                catch (error) {
+                    reject(error);
+                }
+            });
+        });
+        request.on('error', reject);
+        request.end(body);
+    });
+}
 /** Performs one bounded JSON POST, with no redirects or implicit retries.
+ * Uses Node's HTTP clients by default so hosts may replace global Promise with Bluebird.
+ * An explicitly injected fetch implementation retains the existing testing/custom transport contract.
  * @param url Validated endpoint. @param body JSON payload. @param options Network settings.
  * @param token Optional bearer token. @param signal Optional caller deadline.
  * @returns Status and parsed JSON body. @throws HttpError for HTTP, timeout or malformed responses.
@@ -47,10 +94,13 @@ async function postJson(url, body, options, token, signal) {
     const deadline = AbortSignal.timeout(timeout);
     const combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
     try {
-        const response = await (options.fetch ?? fetch)(url, {
+        const headers = { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+        const serialized = JSON.stringify(body);
+        if (!options.fetch)
+            return await postWithNodeHttp(url, serialized, headers, combined);
+        const response = await options.fetch(url, {
             method: 'POST', redirect: 'error', signal: combined,
-            headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-            body: JSON.stringify(body),
+            headers, body: serialized,
         });
         if (!response.ok) {
             await response.body?.cancel();

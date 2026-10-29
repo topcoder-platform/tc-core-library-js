@@ -17,6 +17,8 @@ export interface HttpOptions {
  */
 export declare function endpoint(value: string, allowHttp?: boolean): URL;
 /** Performs one bounded JSON POST, with no redirects or implicit retries.
+ * Uses Node's HTTP clients by default so hosts may replace global Promise with Bluebird.
+ * An explicitly injected fetch implementation retains the existing testing/custom transport contract.
  * @param url Validated endpoint. @param body JSON payload. @param options Network settings.
  * @param token Optional bearer token. @param signal Optional caller deadline.
  * @returns Status and parsed JSON body. @throws HttpError for HTTP, timeout or malformed responses.
