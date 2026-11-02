@@ -108,13 +108,42 @@ function policiesFromConfig(config) {
         return policies;
     });
 }
+/** Snapshots global and service-local denies; local configuration can only add entries.
+ * @param name Environment/configuration key. @param local Optional server-owned additions.
+ * @returns Deduplicated, trimmed identifiers. @throws Error for malformed configuration.
+ */
+function blockedIdentifiers(name, local) {
+    const result = new Set();
+    for (const value of [process.env[name], local]) {
+        if (value === undefined)
+            continue;
+        if (typeof value !== 'string' && !Array.isArray(value))
+            throw new Error(`Invalid ${name}: expected comma-separated text or a string array`);
+        const entries = typeof value === 'string' ? value.split(',') : value;
+        for (const entry of entries) {
+            if (typeof entry !== 'string')
+                throw new Error(`Invalid ${name}: entries must be strings`);
+            const identifier = entry.trim();
+            if (!identifier)
+                continue;
+            if (name === 'ACCESS_CONTROL_BLOCKED_USER_IDS' &&
+                (!/^[1-9]\d{0,18}$/.test(identifier) || BigInt(identifier) > 9223372036854775807n)) {
+                throw new Error(`Invalid ${name}: entries must be positive decimal user IDs`);
+            }
+            result.add(identifier);
+        }
+    }
+    return result;
+}
 /** Creates the shared verifier for HTTP middleware, Nest guards and background services.
  * @param config Explicit issuer policies or the documented v6 environment configuration.
- * @returns Verifier that checks signature, algorithm, issuer, expiry, nbf and configured audience.
+ * @returns Verifier checking signature, algorithm, issuer, expiry, nbf, audience and identity denylists.
  * @throws Error for invalid configuration; verify rejects every invalid token without leaking key details.
  */
 function createJwtVerifier(config) {
     config = { ...config, claimNamespaces: config.claimNamespaces ? [...config.claimNamespaces] : undefined };
+    const blockedSubjects = blockedIdentifiers('ACCESS_CONTROL_BLOCKED_SUBJECTS', config.ACCESS_CONTROL_BLOCKED_SUBJECTS);
+    const blockedUserIds = blockedIdentifiers('ACCESS_CONTROL_BLOCKED_USER_IDS', config.ACCESS_CONTROL_BLOCKED_USER_IDS);
     const policies = policiesFromConfig(config);
     if (!policies.length)
         throw new Error('At least one JWT issuer policy is required');
@@ -181,6 +210,11 @@ function createJwtVerifier(config) {
                     if (!audiences.includes(config.AUTH0_AUDIENCE))
                         throw new Error();
                 }
+                // Evaluate only cryptographically verified, normalized identity claims.
+                // Subject and user-ID lists are independent: either can deny access.
+                if ((typeof user.sub === 'string' && blockedSubjects.has(user.sub)) ||
+                    (user.userId !== undefined && blockedUserIds.has(String(user.userId))))
+                    throw new Error();
                 return user;
             }
             catch {

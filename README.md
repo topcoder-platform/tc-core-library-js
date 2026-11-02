@@ -47,6 +47,53 @@ The verified identity retains original claims and supplies normalized `roles`, `
 
 `verifySignedJwt(token, key, options)` handles Identity's purpose-bound OTP, resend and email-change proofs. It requires an audience and expiry, pins one algorithm (HS256 by default), and enforces `userId` when supplied. It preserves `JsonWebTokenError`/`TokenExpiredError` for existing flow-specific HTTP responses. It does not replace replay/one-time-token storage.
 
+## Shared access-token denylist (4.0.0-rc.2)
+
+Both `createJwtVerifier()` and `createJwtAuthenticator()` automatically read:
+
+| Environment variable | Matches |
+| --- | --- |
+| `ACCESS_CONTROL_BLOCKED_SUBJECTS` | Exact, case-sensitive verified JWT `sub` values, for humans or machines |
+| `ACCESS_CONTROL_BLOCKED_USER_IDS` | Verified, normalized Topcoder user IDs, including legacy tokens without `sub` |
+
+Set comma-separated values, for example `ACCESS_CONTROL_BLOCKED_SUBJECTS=auth0|example,client@clients`
+and `ACCESS_CONTROL_BLOCKED_USER_IDS=123,456`. Whitespace and empty entries are
+ignored. Unset or empty values add no blocks. User IDs must be positive decimal
+integers within the supported signed 64-bit range; invalid configuration fails
+at verifier creation. Subject values are not inferred from user IDs or handles.
+
+The same keys can be supplied in `JwtConfiguration` as comma-separated strings
+or string arrays. These entries are **added to** the environment lists; an empty
+local setting cannot disable a global block. This also applies to explicit
+`issuers` configurations. Each verifier snapshots both lists at creation.
+
+Checks run after signature/issuer/audience validation and identity normalization,
+before an identity is returned. Either matching list rejects the token with the
+existing generic authentication error; middleware returns 401 without exposing
+the blocked identifier. Administrator roles and machine scopes do not bypass it.
+
+For v6 ECS deployments, use shared SSM parameters
+`/config/common/global-appvar/ACCESS_CONTROL_BLOCKED_SUBJECTS` and
+`/config/common/global-appvar/ACCESS_CONTROL_BLOCKED_USER_IDS`, injected under the
+environment names above. Ensure each task imports these parameters and can read
+them. Avoid duplicate service/global parameters with the same environment name:
+deployment precedence could hide the shared list. Roll out new tasks after a
+change; this library does not poll SSM or add AWS calls to token verification.
+
+Services must upgrade to this release and deploy to enforce the lists. Anonymous
+routes, outbound M2M token acquisition, and purpose-bound `verifySignedJwt()`
+proofs are outside this access-token check. Service URL/attachment protections
+remain necessary to prevent SSRF by other identities.
+
+Consume the immutable release with:
+
+```json
+"tc-core-library-js": "github:topcoder-platform/tc-core-library-js#v4.0.0-rc.2"
+```
+
+Compiled `dist` files and declarations are included, so GitHub consumers do not
+need to compile the library. Refresh the service lockfile when upgrading.
+
 ## Outbound M2M tokens
 
 ```ts

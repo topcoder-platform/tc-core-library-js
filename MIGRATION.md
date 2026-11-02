@@ -1,4 +1,29 @@
-# Migration to 4.0.0-rc.1
+# Migration to v4
+
+## 4.0.0-rc.2: shared identity blocking
+
+Upgrade the dependency and lockfile to `github:topcoder-platform/tc-core-library-js#v4.0.0-rc.2`.
+The access-token verifier automatically consumes `ACCESS_CONTROL_BLOCKED_SUBJECTS`
+and `ACCESS_CONTROL_BLOCKED_USER_IDS` from the process environment, including in
+services using explicit issuer policies. No call-site change is required.
+Optional configuration values with those names add to the environment lists.
+
+Inject the corresponding shared SSM parameters under
+`/config/common/global-appvar/` into each ECS task. Services with custom deployment
+scripts or explicit secret allowlists need task-definition and execution-role
+updates. Remove duplicate service-local mappings for these environment names
+once the global mappings are in place, so local values cannot shadow global
+blocks. Existing tasks are not updated by an SSM value change; replace tasks
+after configuring the parameters. The library snapshots lists at construction.
+
+The user-ID list covers legacy access tokens without `sub`; the subject list
+matches exact JWT subjects only. An unset/empty list preserves prior behavior.
+Invalid user-ID entries or non-string configuration entries fail at construction.
+Matched identities fail with the existing generic authentication error (401 in
+the shared middleware). Purpose-bound OTP/email proofs and anonymous routes are
+unchanged. See the README for exact matching, merge semantics, and limitations.
+
+## 4.0.0-rc.1: TypeScript refresh
 
 This breaking prerelease replaces the legacy JavaScript library with a small TypeScript library and folds the used bus API publisher into it. Node.js 22.13 or newer is required. CommonJS, TypeScript declarations and source maps ship together; consumers do not compile this package.
 

@@ -1,6 +1,6 @@
 {
   "name": "tc-core-library-js",
-  "version": "4.0.0-rc.1",
+  "version": "4.0.0-rc.2",
   "description": "Shared Topcoder JWT verification, machine authentication and Bus API publishing",
   "license": "ISC",
   "main": "dist/index.js",

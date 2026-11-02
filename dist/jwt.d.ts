@@ -16,6 +16,10 @@ export interface JwtConfiguration {
     AUTH0_AUDIENCE?: string;
     JWT_AUDIENCE?: string;
     JWT_KEY_CACHE_TIME?: string | number;
+    /** Additional exact JWT subjects; merged with the environment denylist. */
+    ACCESS_CONTROL_BLOCKED_SUBJECTS?: string | readonly string[];
+    /** Additional normalized user IDs; merged with the environment denylist. */
+    ACCESS_CONTROL_BLOCKED_USER_IDS?: string | readonly string[];
     clockTolerance?: number;
     timeoutMs?: number;
     claimNamespaces?: readonly string[];
@@ -50,7 +54,7 @@ export declare function normalizeAuthUser(payload: JwtPayload, namespaces?: read
 export declare function parseIssuers(value: JwtConfiguration['VALID_ISSUERS']): string[];
 /** Creates the shared verifier for HTTP middleware, Nest guards and background services.
  * @param config Explicit issuer policies or the documented v6 environment configuration.
- * @returns Verifier that checks signature, algorithm, issuer, expiry, nbf and configured audience.
+ * @returns Verifier checking signature, algorithm, issuer, expiry, nbf, audience and identity denylists.
  * @throws Error for invalid configuration; verify rejects every invalid token without leaking key details.
  */
 export declare function createJwtVerifier(config: JwtConfiguration): JwtVerifier;
