@@ -6,16 +6,26 @@ export interface JwtIssuer {
     audience?: string | string[];
     /** Explicit compatibility for legacy Topcoder human tokens with no audience. */
     allowMissingAudience?: boolean;
+    /** Required, finite retirement deadline for temporary HS256 access-token verification. */
+    legacyHs256Until?: string;
     secret?: string;
     jwksUri?: string;
 }
 export interface JwtConfiguration {
     issuers?: readonly JwtIssuer[];
+    /** Public issuer policies as JSON; never put secret values in this setting. */
+    JWT_ISSUER_POLICIES?: string;
     VALID_ISSUERS?: string | readonly string[];
     AUTH_SECRET?: string;
     AUTH0_AUDIENCE?: string;
     JWT_AUDIENCE?: string;
     JWT_KEY_CACHE_TIME?: string | number;
+    /** Exact legacy issuers; AUTH_SECRET alone never enables HS256. */
+    LEGACY_HS256_ISSUERS?: string | readonly string[];
+    /** ISO timestamp; checked on every request, including already-running verifiers. */
+    LEGACY_HS256_ACCEPT_UNTIL?: string;
+    /** Maximum exp - iat and token age, in seconds (default 86400). */
+    maxTokenLifetimeSeconds?: number;
     /** Additional exact JWT subjects; merged with the environment denylist. */
     ACCESS_CONTROL_BLOCKED_SUBJECTS?: string | readonly string[];
     /** Additional normalized user IDs; merged with the environment denylist. */

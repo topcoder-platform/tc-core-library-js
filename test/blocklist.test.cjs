@@ -9,8 +9,9 @@ const { createJwtVerifier, createJwtAuthenticator, verifySignedJwt } = require('
 const subjectKey = 'ACCESS_CONTROL_BLOCKED_SUBJECTS';
 const userIdKey = 'ACCESS_CONTROL_BLOCKED_USER_IDS';
 const secret = 'blocklist-test-secret-at-least-32-bytes';
+const legacyHs256Until = new Date(Date.now() + 86400000).toISOString();
 const issuer = 'https://blocklist.example/';
-const config = { issuers: [{ issuer, algorithm: 'HS256', secret, audience: 'api' }], clockTolerance: 0 };
+const config = { issuers: [{ issuer, algorithm: 'HS256', legacyHs256Until, secret, audience: 'api' }], clockTolerance: 0 };
 const sign = (claims = {}, options = {}) => jwt.sign(claims, secret, { issuer, audience: 'api', expiresIn: 300, ...options });
 const invalid = { message: 'Invalid or expired access token' };
 let original;
@@ -41,7 +42,7 @@ test('automatically blocks subjects with explicit policies, including admins and
 test('environment-style JWT configuration uses the same automatic blocks', async () => {
   env[subjectKey] = 'auth0|blocked';
   env[userIdKey] = '123';
-  const verifier = createJwtVerifier({ VALID_ISSUERS: [issuer], AUTH_SECRET: secret });
+  const verifier = createJwtVerifier({ VALID_ISSUERS: [issuer], AUTH_SECRET: secret, LEGACY_HS256_ISSUERS: [issuer], LEGACY_HS256_ACCEPT_UNTIL: legacyHs256Until });
   await assert.rejects(verifier.verify(sign({ sub: 'auth0|blocked' })), invalid);
   await assert.rejects(verifier.verify(sign({ userId: '123' })), invalid);
   assert.equal((await verifier.verify(sign({ userId: '456' }))).userId, '456');

@@ -9,16 +9,26 @@ export interface JwtIssuer {
   audience?: string | string[];
   /** Explicit compatibility for legacy Topcoder human tokens with no audience. */
   allowMissingAudience?: boolean;
+  /** Required, finite retirement deadline for temporary HS256 access-token verification. */
+  legacyHs256Until?: string;
   secret?: string;
   jwksUri?: string;
 }
 export interface JwtConfiguration {
   issuers?: readonly JwtIssuer[];
+  /** Public issuer policies as JSON; never put secret values in this setting. */
+  JWT_ISSUER_POLICIES?: string;
   VALID_ISSUERS?: string | readonly string[];
   AUTH_SECRET?: string;
   AUTH0_AUDIENCE?: string;
   JWT_AUDIENCE?: string;
   JWT_KEY_CACHE_TIME?: string | number;
+  /** Exact legacy issuers; AUTH_SECRET alone never enables HS256. */
+  LEGACY_HS256_ISSUERS?: string | readonly string[];
+  /** ISO timestamp; checked on every request, including already-running verifiers. */
+  LEGACY_HS256_ACCEPT_UNTIL?: string;
+  /** Maximum exp - iat and token age, in seconds (default 86400). */
+  maxTokenLifetimeSeconds?: number;
   /** Additional exact JWT subjects; merged with the environment denylist. */
   ACCESS_CONTROL_BLOCKED_SUBJECTS?: string | readonly string[];
   /** Additional normalized user IDs; merged with the environment denylist. */
@@ -114,12 +124,23 @@ export function parseIssuers(value: JwtConfiguration['VALID_ISSUERS']): string[]
  */
 function policiesFromConfig(config: JwtConfiguration): JwtIssuer[] {
   if (config.issuers) return config.issuers.map(policy => ({ ...policy, audience: Array.isArray(policy.audience) ? [...policy.audience] : policy.audience }));
-  return parseIssuers(config.VALID_ISSUERS).flatMap(issuer => {
-    const audience = [...new Set([config.JWT_AUDIENCE, config.AUTH0_AUDIENCE].filter((value): value is string => Boolean(value)))];
-    const policies: JwtIssuer[] = audience.length ? [{ issuer, algorithm: 'RS256', audience }] : [];
-    if (config.AUTH_SECRET) policies.push({ issuer, algorithm: 'HS256', secret: config.AUTH_SECRET, allowMissingAudience: true });
-    return policies;
-  });
+  const serialized = config.JWT_ISSUER_POLICIES ?? process.env.JWT_ISSUER_POLICIES;
+  if (serialized !== undefined) {
+    let parsed: unknown;
+    try { parsed = JSON.parse(serialized) as unknown; } catch { throw new Error('Invalid JWT_ISSUER_POLICIES JSON'); }
+    const allowed = new Set(['issuer', 'algorithm', 'audience', 'jwksUri', 'allowMissingAudience', 'legacyHs256Until']);
+    if (!Array.isArray(parsed) || !parsed.length || parsed.some(policy => !policy || typeof policy !== 'object' || Array.isArray(policy) || Object.keys(policy).some(key => !allowed.has(key)))) throw new Error('Invalid JWT_ISSUER_POLICIES entries');
+    return (parsed as JwtIssuer[]).map(policy => ({ ...policy, secret: policy.algorithm === 'HS256' ? config.AUTH_SECRET : undefined }));
+  }
+  const issuers = parseIssuers(config.VALID_ISSUERS);
+  const legacySetting = config.LEGACY_HS256_ISSUERS ?? process.env.LEGACY_HS256_ISSUERS;
+  const legacy = legacySetting === undefined ? [] : parseIssuers(legacySetting);
+  if (legacy.some(issuer => !issuers.includes(issuer))) throw new Error('Legacy issuers must be explicitly trusted');
+  const deadline = config.LEGACY_HS256_ACCEPT_UNTIL ?? process.env.LEGACY_HS256_ACCEPT_UNTIL;
+  const audience = [...new Set([config.JWT_AUDIENCE, config.AUTH0_AUDIENCE].filter((value): value is string => Boolean(value)))];
+  return issuers.map(issuer => legacy.includes(issuer)
+    ? { issuer, algorithm: 'HS256', secret: config.AUTH_SECRET, allowMissingAudience: true, legacyHs256Until: deadline }
+    : { issuer, algorithm: 'RS256', audience });
 }
 
 type BlocklistKey = 'ACCESS_CONTROL_BLOCKED_SUBJECTS' | 'ACCESS_CONTROL_BLOCKED_USER_IDS';
@@ -161,17 +182,24 @@ export function createJwtVerifier(config: JwtConfiguration): JwtVerifier {
   if (!policies.length) throw new Error('At least one JWT issuer policy is required');
   const tolerance = config.clockTolerance ?? 5;
   const timeout = config.timeoutMs ?? 5000;
+  const maxLifetime = config.maxTokenLifetimeSeconds ?? 86400;
+  if (!Number.isSafeInteger(maxLifetime) || maxLifetime < 1 || maxLifetime > 86400) throw new Error('JWT lifetime must be between 1 and 86400 seconds');
   if (!Number.isFinite(tolerance) || tolerance < 0 || tolerance > 60 || !Number.isSafeInteger(timeout) || timeout <= 0 || timeout > 30000) throw new Error('Invalid JWT timing configuration');
   const clients = new Map<JwtIssuer, jwks.JwksClient>();
+  const legacyDeadlines = new Map<JwtIssuer, number>();
   const seen = new Set<string>();
   for (const policy of policies) {
-    if (!policy.issuer || !['HS256', 'RS256'].includes(policy.algorithm)) throw new Error('Invalid issuer policy');
-    const id = JSON.stringify([policy.issuer, policy.algorithm]);
-    if (seen.has(id)) throw new Error('Duplicate issuer/algorithm policy');
+    if (typeof policy.issuer !== 'string' || !policy.issuer || policy.issuer.trim() !== policy.issuer || !['HS256', 'RS256'].includes(policy.algorithm)) throw new Error('Invalid issuer policy');
+    const id = policy.issuer;
+    if (seen.has(id)) throw new Error('Duplicate issuer policy: one algorithm per issuer is required');
     seen.add(id);
-    if (!policy.audience && !policy.allowMissingAudience) throw new Error('JWT audience is required');
-    if (Array.isArray(policy.audience) && (!policy.audience.length || policy.audience.some(a => !a))) throw new Error('Invalid JWT audience');
+    if (!policy.audience && !(policy.algorithm === 'HS256' && policy.allowMissingAudience === true)) throw new Error('JWT audience is required');
+    if (policy.audience !== undefined && (typeof policy.audience !== 'string' && !Array.isArray(policy.audience) ||
+        (Array.isArray(policy.audience) ? !policy.audience.length || policy.audience.some(a => typeof a !== 'string' || !a.trim()) : !policy.audience.trim()))) throw new Error('Invalid JWT audience');
     if (policy.algorithm === 'HS256') {
+      const deadline = typeof policy.legacyHs256Until === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(policy.legacyHs256Until) ? Date.parse(policy.legacyHs256Until) : NaN;
+      if (!Number.isFinite(deadline) || deadline <= Date.now()) throw new Error('Legacy HS256 requires an unexpired UTC retirement deadline');
+      legacyDeadlines.set(policy, deadline);
       if (!policy.secret || Buffer.byteLength(policy.secret, 'utf8') < 32 || policy.secret.includes('-----BEGIN')) throw new Error('A symmetric JWT secret of at least 32 bytes is required');
     } else {
       const url = endpoint(policy.jwksUri || `${policy.issuer.replace(/\/$/, '')}/.well-known/jwks.json`, config.allowInsecureHttp);
@@ -187,7 +215,7 @@ export function createJwtVerifier(config: JwtConfiguration): JwtVerifier {
         if (!decoded || typeof decoded.payload !== 'object' || decoded.payload === null || decoded.header.crit) throw new Error();
         const untrustedIssuer = decoded.payload.iss;
         const policy = policies.find(p => p.issuer === untrustedIssuer && p.algorithm === decoded.header.alg);
-        if (!policy) throw new Error();
+        if (!policy || (policy.algorithm === 'HS256' && Date.now() >= legacyDeadlines.get(policy)!)) throw new Error();
         let key: string;
         if (policy.algorithm === 'HS256') key = policy.secret!;
         else {
@@ -198,7 +226,9 @@ export function createJwtVerifier(config: JwtConfiguration): JwtVerifier {
         const payload = jwt.verify(token, key, { algorithms: [policy.algorithm], issuer: policy.issuer,
           ...(policy.audience ? { audience: Array.isArray(policy.audience) ? policy.audience as [string, ...string[]] : policy.audience } : {}), clockTolerance: tolerance });
         if (typeof payload !== 'object' || typeof payload.exp !== 'number' || !Number.isFinite(payload.exp)) throw new Error();
-        if (typeof payload.iat === 'number' && payload.iat > Date.now() / 1000 + tolerance) throw new Error();
+        const now = Date.now() / 1000;
+        if (typeof payload.iat !== 'number' || !Number.isFinite(payload.iat) || payload.iat > now + tolerance ||
+            payload.exp <= payload.iat || payload.exp - payload.iat > maxLifetime || now - payload.iat > maxLifetime + tolerance) throw new Error();
         // Legacy human tokens may omit aud; machine tokens must match the configured API audience.
         const user = normalizeAuthUser(payload, config.claimNamespaces);
         if (user.isMachine && !policy.audience) throw new Error();

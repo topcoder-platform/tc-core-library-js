@@ -6,8 +6,9 @@ const jwt = require('jsonwebtoken');
 const { createJwtVerifier, createJwtAuthenticator, normalizeAuthUser, createM2MClient, createBusApiClient, resolveBusEventsUrl } = require('../dist');
 
 const secret = 'a-test-only-secret-with-at-least-32-bytes';
+const legacyHs256Until = new Date(Date.now() + 86400000).toISOString();
 const issuer = 'https://issuer.example/';
-const config = { issuers: [{ issuer, algorithm: 'HS256', secret, audience: 'api' }], clockTolerance: 0 };
+const config = { issuers: [{ issuer, algorithm: 'HS256', legacyHs256Until, secret, audience: 'api' }], clockTolerance: 0 };
 const sign = (claims = {}, options = {}) => jwt.sign({ sub: '42', ...claims }, secret, { issuer, audience: 'api', expiresIn: 300, ...options });
 
 test('verifies signed identities and exact trusted namespaced claims', async () => {
@@ -26,8 +27,8 @@ test('rejects malformed, unsigned, wrong-key, wrong-issuer/audience, expired and
 test('rejects missing trust, duplicate policies, unsafe keys and unconfigured audience', () => {
   assert.throws(() => createJwtVerifier({}), /VALID_ISSUERS/);
   assert.throws(() => createJwtVerifier({ issuers: [...config.issuers, ...config.issuers] }), /Duplicate/);
-  assert.throws(() => createJwtVerifier({ issuers: [{ issuer, algorithm: 'HS256', secret }] }), /audience/);
-  assert.throws(() => createJwtVerifier({ issuers: [{ issuer, algorithm: 'HS256', secret: '-----BEGIN PUBLIC KEY-----', audience: 'api' }] }), /symmetric/);
+  assert.throws(() => createJwtVerifier({ issuers: [{ issuer, algorithm: 'HS256', legacyHs256Until, secret }] }), /audience/);
+  assert.throws(() => createJwtVerifier({ issuers: [{ issuer, algorithm: 'HS256', legacyHs256Until, secret: '-----BEGIN PUBLIC KEY-----', audience: 'api' }] }), /symmetric/);
 });
 
 test('does not promote scope-bearing humans or spoofed flags and arbitrary suffix claims', () => {
@@ -141,16 +142,16 @@ test('purpose-bound proofs require expiry, exact audience and exact user binding
   assert.throws(() => verifySignedJwt(jwt.sign({ userId: '42' }, secret, { audience: 'otp' }), secret, { audience: 'otp' }));
 });
 
-test('environment configuration disables RSA without a configured audience and rejects default HMAC secrets', async () => {
-  const verifier = createJwtVerifier({ VALID_ISSUERS: [issuer], AUTH_SECRET: secret });
+test('environment configuration requires RSA audiences and rejects weak explicitly enabled HMAC secrets', async () => {
+  const verifier = createJwtVerifier({ VALID_ISSUERS: [issuer], AUTH_SECRET: secret, LEGACY_HS256_ISSUERS: [issuer], LEGACY_HS256_ACCEPT_UNTIL: legacyHs256Until });
   assert.equal((await verifier.verify(sign())).sub, '42');
-  assert.throws(() => createJwtVerifier({ VALID_ISSUERS: [issuer], AUTH_SECRET: 'mysecret' }), /32 bytes/);
-  assert.throws(() => createJwtVerifier({ VALID_ISSUERS: [issuer] }), /issuer policy/);
+  assert.throws(() => createJwtVerifier({ VALID_ISSUERS: [issuer], AUTH_SECRET: 'mysecret', LEGACY_HS256_ISSUERS: [issuer], LEGACY_HS256_ACCEPT_UNTIL: legacyHs256Until }), /32 bytes/);
+  assert.throws(() => createJwtVerifier({ VALID_ISSUERS: [issuer] }), /audience/);
 });
 
 
 test('legacy audience-free HMAC policy cannot authenticate machines, including namespaced grants', async () => {
-  const verifier = createJwtVerifier({ VALID_ISSUERS: [issuer], AUTH_SECRET: secret });
+  const verifier = createJwtVerifier({ VALID_ISSUERS: [issuer], AUTH_SECRET: secret, LEGACY_HS256_ISSUERS: [issuer], LEGACY_HS256_ACCEPT_UNTIL: legacyHs256Until });
   for (const claims of [{ gty: 'client-credentials' }, { 'https://topcoder.com/gty': 'client-credentials' }]) {
     await assert.rejects(verifier.verify(sign(claims)), /Invalid or expired/);
   }
