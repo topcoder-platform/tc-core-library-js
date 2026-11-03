@@ -5,6 +5,13 @@ HS256 signing authority for every VALID_ISSUERS entry. Use explicit public
 JWT_ISSUER_POLICIES, or RS256 issuers with configured API audiences. Access tokens
 must contain iat and exp and have a lifetime no greater than 24 hours.
 
+The same timestamp requirements and 24-hour lifetime ceiling apply to
+`verifySignedJwt()` for OTP, resend and email-change proofs. Check proof issuers:
+they must include numeric `iat` and `exp`, with `0 < exp - iat <= 86400` seconds.
+Previously issued proofs without `iat` or with a longer original lifetime must
+be reissued; entering their final 24 hours does not make them acceptable. The
+helper retains its existing `JsonWebTokenError`/`TokenExpiredError` contract.
+
 Existing Topcoder HS256 sessions require an explicit legacy issuer and a finite
 UTC retirement deadline during migration. This does not protect against disclosure
 of that legacy key: rotate it during incident containment, then remove the HS256

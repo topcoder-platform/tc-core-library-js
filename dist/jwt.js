@@ -12,6 +12,7 @@ exports.verifySignedJwt = verifySignedJwt;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const jwks_rsa_1 = __importDefault(require("jwks-rsa"));
 const http_1 = require("./http");
+const MAX_TOKEN_LIFETIME_SECONDS = 86400;
 /** Extracts exact standard or explicitly trusted namespaced claims after verification.
  * @param payload Verified claims. @param name Exact claim name. @param namespaces Trusted namespace prefixes.
  * @returns Claim value or undefined. No exceptions are raised.
@@ -152,6 +153,21 @@ function blockedIdentifiers(name, local) {
     }
     return result;
 }
+/** Enforces the same mandatory timestamps and lifetime ceiling for every verified JWT.
+ * @param payload Cryptographically verified claims. @param maxLifetime Maximum lifetime in seconds.
+ * @param tolerance Allowed clock skew, in seconds; it never extends the original lifetime limit.
+ * @throws JsonWebTokenError for missing, malformed or inconsistent timestamps or excessive lifetime.
+ */
+function assertJwtLifetime(payload, maxLifetime = MAX_TOKEN_LIFETIME_SECONDS, tolerance = 0) {
+    if (typeof payload !== 'object' || typeof payload.exp !== 'number' || !Number.isFinite(payload.exp)) {
+        throw new jsonwebtoken_1.default.JsonWebTokenError('Token expiry is required');
+    }
+    const now = Date.now() / 1000;
+    if (typeof payload.iat !== 'number' || !Number.isFinite(payload.iat) || payload.iat > now + tolerance ||
+        payload.exp <= payload.iat || payload.exp - payload.iat > maxLifetime || now - payload.iat > maxLifetime + tolerance) {
+        throw new jsonwebtoken_1.default.JsonWebTokenError('Invalid token lifetime');
+    }
+}
 /** Creates the shared verifier for HTTP middleware, Nest guards and background services.
  * @param config Explicit issuer policies or the documented v6 environment configuration.
  * @returns Verifier checking signature, algorithm, issuer, expiry, nbf, audience and identity denylists.
@@ -166,8 +182,8 @@ function createJwtVerifier(config) {
         throw new Error('At least one JWT issuer policy is required');
     const tolerance = config.clockTolerance ?? 5;
     const timeout = config.timeoutMs ?? 5000;
-    const maxLifetime = config.maxTokenLifetimeSeconds ?? 86400;
-    if (!Number.isSafeInteger(maxLifetime) || maxLifetime < 1 || maxLifetime > 86400)
+    const maxLifetime = config.maxTokenLifetimeSeconds ?? MAX_TOKEN_LIFETIME_SECONDS;
+    if (!Number.isSafeInteger(maxLifetime) || maxLifetime < 1 || maxLifetime > MAX_TOKEN_LIFETIME_SECONDS)
         throw new Error('JWT lifetime must be between 1 and 86400 seconds');
     if (!Number.isFinite(tolerance) || tolerance < 0 || tolerance > 60 || !Number.isSafeInteger(timeout) || timeout <= 0 || timeout > 30000)
         throw new Error('Invalid JWT timing configuration');
@@ -223,12 +239,7 @@ function createJwtVerifier(config) {
                 }
                 const payload = jsonwebtoken_1.default.verify(token, key, { algorithms: [policy.algorithm], issuer: policy.issuer,
                     ...(policy.audience ? { audience: Array.isArray(policy.audience) ? policy.audience : policy.audience } : {}), clockTolerance: tolerance });
-                if (typeof payload !== 'object' || typeof payload.exp !== 'number' || !Number.isFinite(payload.exp))
-                    throw new Error();
-                const now = Date.now() / 1000;
-                if (typeof payload.iat !== 'number' || !Number.isFinite(payload.iat) || payload.iat > now + tolerance ||
-                    payload.exp <= payload.iat || payload.exp - payload.iat > maxLifetime || now - payload.iat > maxLifetime + tolerance)
-                    throw new Error();
+                assertJwtLifetime(payload, maxLifetime, tolerance);
                 // Legacy human tokens may omit aud; machine tokens must match the configured API audience.
                 const user = normalizeAuthUser(payload, config.claimNamespaces);
                 if (user.isMachine && !policy.audience)
@@ -288,7 +299,7 @@ function createJwtAuthenticator(config) {
     };
 }
 /** Verifies purpose-bound Identity API proofs (OTP, resend, email change) with a configured key.
- * These application proofs may omit issuer, but always require their distinct audience and expiry.
+ * These application proofs may omit issuer, but require their distinct audience, iat and exp with a lifetime of at most 24 hours.
  * @param token Compact JWT. @param key Server-configured signing key, never token-controlled.
  * @param options Required purpose audience, optional issuer/user binding, and explicit algorithms (HS256 by default).
  * @returns Verified original claims. @throws JsonWebTokenError or TokenExpiredError on verification failure.
@@ -300,8 +311,7 @@ function verifySignedJwt(token, key, options) {
     if (!algorithms.length || algorithms.some(algorithm => !['HS256', 'RS256'].includes(algorithm)) || new Set(algorithms).size !== 1)
         throw new jsonwebtoken_1.default.JsonWebTokenError('One signing algorithm is required');
     const payload = jsonwebtoken_1.default.verify(token, key, { audience: options.audience, issuer: options.issuer, algorithms });
-    if (typeof payload !== 'object' || typeof payload.exp !== 'number')
-        throw new jsonwebtoken_1.default.JsonWebTokenError('Token expiry is required');
+    assertJwtLifetime(payload);
     if (options.userId !== undefined && String(payload.userId ?? payload.sub) !== String(options.userId))
         throw new jsonwebtoken_1.default.JsonWebTokenError('Token user mismatch');
     return payload;
