@@ -1,5 +1,7 @@
 # tc-core-library-js v4
 
+**4.0.0-rc.3 changes access-token trust. Read MIGRATION.md before upgrading a service accepting legacy HS256 tokens.**
+
 TypeScript primitives for Topcoder v6 services: JWT verification and identity normalization, outbound OAuth client credentials, and Bus API publishing. Requires Node.js 22.13 or later. The package includes CommonJS output and TypeScript declarations; named imports work from TypeScript and ESM, and `require()` works from CommonJS.
 
 ```ts
@@ -19,12 +21,12 @@ const user = await verifier.verify(compactToken);
 
 ## JWT contract
 
-All access-token verification uses one implementation. It verifies the signature against an explicit HS256/RS256 algorithm, exact configured issuer, expiration, not-before and configured audience. Expiration is mandatory in every environment; future `iat`, unsupported algorithms, malformed tokens, missing RSA key IDs and conflicting human/machine claims are rejected. Tokens are limited to 32 KiB. Failures use a generic message and middleware returns HTTP 401.
+All access-token verification uses one implementation. It verifies the signature against one configured algorithm per issuer, exact issuer, expiration, issuance time, not-before and configured audience. Expiration and issuance time are mandatory in every environment; future `iat`, unsupported algorithms, malformed tokens, missing RSA key IDs and conflicting human/machine claims are rejected. Tokens are limited to 32 KiB. Failures use a generic message and middleware returns HTTP 401.
 
 `VALID_ISSUERS` accepts a JSON string array, a comma-separated list, or an array. No issuer is learned from a token. For the environment-style configuration:
 
-- `AUTH_SECRET` enables legacy HS256 human tokens and must contain at least 32 UTF-8 bytes. There is no default secret. These legacy tokens may omit `aud`; their trust boundary remains the configured issuer and shared signing key.
-- `JWT_AUDIENCE` configures an allowed RSA browser/application audience. `AUTH0_AUDIENCE` configures an allowed RSA API audience. Without either, RSA verification is disabled. Client-credentials tokens require an audience-bound policy and must match `AUTH0_AUDIENCE` when it is configured; the audience-free legacy HMAC policy is human-only.
+- `AUTH_SECRET` alone **does not enable HS256**. The environment-style contract uses RS256 by default. During a bounded migration only, set `LEGACY_HS256_ISSUERS` to exact trusted legacy issuers and `LEGACY_HS256_ACCEPT_UNTIL` to a UTC ISO timestamp. These issuers use HS256 instead of RS256, require a secret of at least 32 UTF-8 bytes, and may omit audience for existing Topcoder sessions. A holder of that key can still forge tokens until this compatibility policy expires.
+- `JWT_AUDIENCE` configures an allowed RSA browser/application audience. `AUTH0_AUDIENCE` configures an allowed RSA API audience. Without either, RSA configuration fails closed. Client-credentials tokens require an audience-bound policy and must match `AUTH0_AUDIENCE` when it is configured; the audience-free legacy HMAC policy is human-only.
 - Audience values are server configuration, never decoded from an incoming token. Services accepting Auth0 browser tokens must set `JWT_AUDIENCE` to the intended application's client ID/audience.
 - JWKS endpoints are derived only from allowlisted issuers. Explicit policies can override the endpoint. Each verifier has bounded caching, a 5-second network timeout and a per-issuer request limit.
 
@@ -36,12 +38,27 @@ const verifier = createJwtVerifier({
     { issuer: 'https://auth.example/', algorithm: 'RS256',
       jwksUri: 'https://auth.example/.well-known/jwks.json', audience: 'my-api' },
     { issuer: 'https://api.example', algorithm: 'HS256',
-      secret: process.env.AUTH_SECRET, allowMissingAudience: true },
+      secret: process.env.AUTH_SECRET, allowMissingAudience: true,
+      legacyHs256Until: process.env.LEGACY_HS256_ACCEPT_UNTIL },
   ],
 });
 ```
 
-Explicit policies require an audience unless `allowMissingAudience` is deliberately enabled for a legacy contract. The default clock tolerance is 5 seconds and can be configured between 0 and 60 seconds. HTTPS is required for remote endpoints; loopback HTTP is supported for local tests. Internal HTTP requires an explicit `allowInsecureHttp` opt-in.
+RS256 policies always require an audience. Only explicitly enabled, time-limited HS256 policies may use `allowMissingAudience`. A single issuer cannot simultaneously accept RS256 and HS256. Every request rechecks the HS256 retirement deadline, so a running process cannot extend compatibility past it. `maxTokenLifetimeSeconds` limits both `exp - iat` and token age; its default and maximum are 86400 seconds and it can be lowered per service. The default clock tolerance is 5 seconds and can be configured between 0 and 60 seconds. HTTPS is required for remote endpoints; loopback HTTP is supported for local tests. Internal HTTP requires an explicit `allowInsecureHttp` opt-in.
+
+For fleet deployment, `JWT_ISSUER_POLICIES` can contain a JSON array of public policies
+(`issuer`, `algorithm`, `audience`, `jwksUri`, and temporary legacy compatibility fields).
+It is read from configuration or the process environment and takes precedence over
+`VALID_ISSUERS`. Programmatic `issuers` takes precedence over that JSON setting.
+Secret values are forbidden in JSON policies; temporary HS256 policies receive
+`AUTH_SECRET` separately. Use production-only issuers/audiences in production.
+
+For a Topcoder issuer with an isolated asymmetric signer, configure its published
+JWKS endpoint explicitly; the API domain's default `/.well-known/jwks.json` does
+not automatically exist. Deploy the issuer and its public JWKS endpoint, configure
+all verifiers, and coordinate the signing-policy cutover before retiring HS256.
+Do not deploy this breaking verifier upgrade into existing legacy sessions without
+that migration or an explicit temporary HS256 policy.
 
 The verified identity retains original claims and supplies normalized `roles`, `scopes`, `userId`, `handle`, `email` and `isMachine`. Only exact standard claims and configured namespace prefixes are read. Default namespaces cover Topcoder's production/development domains and API namespaces; custom providers should pass `claimNamespaces`. Numeric user IDs are validated and preserved without lossy conversion. A machine requires `gty: "client-credentials"` with no human ID or roles. Scope presence alone never establishes a machine identity. Route-specific roles, scope aliases, database permissions and active-session checks remain in each service.
 
@@ -88,7 +105,7 @@ remain necessary to prevent SSRF by other identities.
 Consume the immutable release with:
 
 ```json
-"tc-core-library-js": "github:topcoder-platform/tc-core-library-js#v4.0.0-rc.2"
+"tc-core-library-js": "github:topcoder-platform/tc-core-library-js#v4.0.0-rc.3"
 ```
 
 Compiled `dist` files and declarations are included, so GitHub consumers do not

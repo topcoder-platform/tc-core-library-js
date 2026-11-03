@@ -1,3 +1,28 @@
+# Pending security migration: explicit access-token trust
+
+This change is intentionally breaking. AUTH_SECRET no longer automatically grants
+HS256 signing authority for every VALID_ISSUERS entry. Use explicit public
+JWT_ISSUER_POLICIES, or RS256 issuers with configured API audiences. Access tokens
+must contain iat and exp and have a lifetime no greater than 24 hours.
+
+Existing Topcoder HS256 sessions require an explicit legacy issuer and a finite
+UTC retirement deadline during migration. This does not protect against disclosure
+of that legacy key: rotate it during incident containment, then remove the HS256
+policy. Do not keep the retired compromised key as a fallback.
+
+Retain the Topcoder issuer with a separately controlled asymmetric signing key.
+Only the identity issuer should have signing permission; API verifiers receive its
+public JWKS. Pin the issuer, RS256 and the intended API audience. Keep one-time
+Identity proofs on a different key and audience through verifySignedJwt(). Never
+share that key with the access-token verifier or expose a generic signing endpoint.
+
+A JWT_ISSUER_POLICIES environment setting allows public verifier configuration to
+be deployed without copying any signing secret into every service. Upgrade and
+test every consumer before changing the active issuer algorithm. Shared identity
+denylists continue to apply to cryptographically verified tokens.
+
+---
+
 # Migration to v4
 
 ## 4.0.0-rc.2: shared identity blocking
