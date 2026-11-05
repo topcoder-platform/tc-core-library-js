@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getClaim = getClaim;
+exports.hasVerifiedEmail = hasVerifiedEmail;
 exports.normalizeAuthUser = normalizeAuthUser;
 exports.parseIssuers = parseIssuers;
 exports.createJwtVerifier = createJwtVerifier;
@@ -12,17 +13,29 @@ exports.verifySignedJwt = verifySignedJwt;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const jwks_rsa_1 = __importDefault(require("jwks-rsa"));
 const http_1 = require("./http");
+const defaultClaimNamespaces = ['https://topcoder.com/', 'https://www.topcoder.com/', 'https://topcoder-dev.com/', 'https://api.topcoder.com/v6/', 'https://api.topcoder-dev.com/v6/', 'http://www.topcoder.com/', 'https://api.topcoder.com/', 'https://api.topcoder-dev.com/'];
 /** Extracts exact standard or explicitly trusted namespaced claims after verification.
  * @param payload Verified claims. @param name Exact claim name. @param namespaces Trusted namespace prefixes.
  * @returns Claim value or undefined. No exceptions are raised.
  */
-function getClaim(payload, name, namespaces = ['https://topcoder.com/', 'https://www.topcoder.com/', 'https://topcoder-dev.com/', 'https://api.topcoder.com/v6/', 'https://api.topcoder-dev.com/v6/', 'http://www.topcoder.com/', 'https://api.topcoder.com/', 'https://api.topcoder-dev.com/']) {
+function getClaim(payload, name, namespaces = defaultClaimNamespaces) {
     if (Object.hasOwn(payload, name))
         return payload[name];
     for (const namespace of namespaces)
         if (Object.hasOwn(payload, `${namespace}${name}`))
             return payload[`${namespace}${name}`];
     return undefined;
+}
+/** Requires an explicit boolean verification claim from a trusted namespace.
+ * Conflicting aliases fail closed. Activation proofs are not access tokens and
+ * intentionally use verifySignedJwt instead.
+ */
+function hasVerifiedEmail(payload, namespaces) {
+    const values = ['email_verified', 'emailVerified', 'emailActive']
+        .flatMap(name => ['', ...(namespaces ?? defaultClaimNamespaces)]
+        .filter(prefix => Object.hasOwn(payload, `${prefix}${name}`))
+        .map(prefix => payload[`${prefix}${name}`]));
+    return values.length > 0 && values.every(value => value === true);
 }
 /** Normalizes a verified roles/scopes claim to a list, preserving multiword role names.
  * @param value Claim value. @param separator String-list separator.
@@ -231,6 +244,8 @@ function createJwtVerifier(config) {
                     throw new Error();
                 // Legacy human tokens may omit aud; machine tokens must match the configured API audience.
                 const user = normalizeAuthUser(payload, config.claimNamespaces);
+                if (!user.isMachine && !hasVerifiedEmail(payload, config.claimNamespaces))
+                    throw new Error();
                 if (user.isMachine && !policy.audience)
                     throw new Error();
                 if (user.isMachine && config.AUTH0_AUDIENCE) {

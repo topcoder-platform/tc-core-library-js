@@ -6,7 +6,7 @@ const issuer = 'https://api.example';
 const secret = 'only-a-test-secret-at-least-thirty-two-bytes';
 const deadline = () => new Date(Date.now() + 60000).toISOString();
 const legacy = (extra = {}) => ({ issuer, algorithm: 'HS256', secret, audience: 'api', legacyHs256Until: deadline(), ...extra });
-const sign = (payload = {}, options = {}) => jwt.sign({ sub: 'user', ...payload }, secret, { issuer, audience: 'api', expiresIn: 300, ...options });
+const sign = (payload = {}, options = {}) => jwt.sign({ sub: 'user', email_verified: true, ...payload }, secret, { issuer, audience: 'api', expiresIn: 300, ...options });
 
 test('knowing AUTH_SECRET cannot authenticate an access token under default trust', async () => {
   const verifier = createJwtVerifier({ VALID_ISSUERS: [issuer], AUTH_SECRET: secret, AUTH0_AUDIENCE: 'api' });
