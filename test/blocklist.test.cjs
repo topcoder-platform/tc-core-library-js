@@ -11,7 +11,7 @@ const userIdKey = 'ACCESS_CONTROL_BLOCKED_USER_IDS';
 const secret = 'blocklist-test-secret-at-least-32-bytes';
 const issuer = 'https://blocklist.example/';
 const config = { issuers: [{ issuer, algorithm: 'HS256', secret, audience: 'api' }], clockTolerance: 0 };
-const sign = (claims = {}, options = {}) => jwt.sign(claims, secret, { issuer, audience: 'api', expiresIn: 300, ...options });
+const sign = (claims = {}, options = {}) => jwt.sign({ email_verified: true, ...claims }, secret, { issuer, audience: 'api', expiresIn: 300, ...options });
 const invalid = { message: 'Invalid or expired access token' };
 let original;
 
@@ -146,7 +146,7 @@ test('RS256 blocks verified subjects and user IDs with cached JWKS', async (t) =
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   const verifier = createJwtVerifier({ issuers: [{ issuer, algorithm: 'RS256', audience: 'api', jwksUri: `http://127.0.0.1:${server.address().port}/keys` }] });
-  const rsaSign = claims => jwt.sign(claims, privateKey, { algorithm: 'RS256', keyid: 'key-1', issuer, audience: 'api', expiresIn: 300 });
+  const rsaSign = claims => jwt.sign({ email_verified: true, ...claims }, privateKey, { algorithm: 'RS256', keyid: 'key-1', issuer, audience: 'api', expiresIn: 300 });
   await assert.rejects(verifier.verify(rsaSign({ sub: 'auth0|blocked' })), invalid);
   await assert.rejects(verifier.verify(rsaSign({ userId: '123' })), invalid);
   assert.equal((await verifier.verify(rsaSign({ sub: 'allowed' }))).sub, 'allowed');

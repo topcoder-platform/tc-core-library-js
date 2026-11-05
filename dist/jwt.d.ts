@@ -42,6 +42,11 @@ export interface JwtVerifier {
  * @returns Claim value or undefined. No exceptions are raised.
  */
 export declare function getClaim(payload: JwtPayload, name: string, namespaces?: readonly string[]): unknown;
+/** Requires an explicit boolean verification claim from a trusted namespace.
+ * Conflicting aliases fail closed. Activation proofs are not access tokens and
+ * intentionally use verifySignedJwt instead.
+ */
+export declare function hasVerifiedEmail(payload: JwtPayload, namespaces?: readonly string[]): boolean;
 /** Produces the common Topcoder identity without trusting token-supplied derived flags.
  * @param payload Cryptographically verified JWT claims. @param namespaces Exact trusted namespace prefixes.
  * @returns Normalized identity retaining original claims. @throws Error for malformed user IDs.
