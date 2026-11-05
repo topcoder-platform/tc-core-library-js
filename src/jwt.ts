@@ -51,14 +51,28 @@ export interface JwtVerifier {
   verify(token: string): Promise<AuthUser>;
 }
 
+const defaultClaimNamespaces = ['https://topcoder.com/', 'https://www.topcoder.com/', 'https://topcoder-dev.com/', 'https://api.topcoder.com/v6/', 'https://api.topcoder-dev.com/v6/', 'http://www.topcoder.com/', 'https://api.topcoder.com/', 'https://api.topcoder-dev.com/'];
+
 /** Extracts exact standard or explicitly trusted namespaced claims after verification.
  * @param payload Verified claims. @param name Exact claim name. @param namespaces Trusted namespace prefixes.
  * @returns Claim value or undefined. No exceptions are raised.
  */
-export function getClaim(payload: JwtPayload, name: string, namespaces: readonly string[] = ['https://topcoder.com/', 'https://www.topcoder.com/', 'https://topcoder-dev.com/', 'https://api.topcoder.com/v6/', 'https://api.topcoder-dev.com/v6/', 'http://www.topcoder.com/', 'https://api.topcoder.com/', 'https://api.topcoder-dev.com/']): unknown {
+export function getClaim(payload: JwtPayload, name: string, namespaces: readonly string[] = defaultClaimNamespaces): unknown {
   if (Object.hasOwn(payload, name)) return payload[name];
   for (const namespace of namespaces) if (Object.hasOwn(payload, `${namespace}${name}`)) return payload[`${namespace}${name}`];
   return undefined;
+}
+
+/** Requires an explicit boolean verification claim from a trusted namespace.
+ * Conflicting aliases fail closed. Activation proofs are not access tokens and
+ * intentionally use verifySignedJwt instead.
+ */
+export function hasVerifiedEmail(payload: JwtPayload, namespaces?: readonly string[]): boolean {
+  const values = ['email_verified', 'emailVerified', 'emailActive']
+    .flatMap(name => ['', ...(namespaces ?? defaultClaimNamespaces)]
+      .filter(prefix => Object.hasOwn(payload, `${prefix}${name}`))
+      .map(prefix => payload[`${prefix}${name}`] as unknown));
+  return values.length > 0 && values.every(value => value === true);
 }
 
 /** Normalizes a verified roles/scopes claim to a list, preserving multiword role names.
@@ -231,6 +245,7 @@ export function createJwtVerifier(config: JwtConfiguration): JwtVerifier {
             payload.exp <= payload.iat || payload.exp - payload.iat > maxLifetime || now - payload.iat > maxLifetime + tolerance) throw new Error();
         // Legacy human tokens may omit aud; machine tokens must match the configured API audience.
         const user = normalizeAuthUser(payload, config.claimNamespaces);
+        if (!user.isMachine && !hasVerifiedEmail(payload, config.claimNamespaces)) throw new Error();
         if (user.isMachine && !policy.audience) throw new Error();
         if (user.isMachine && config.AUTH0_AUDIENCE) {
           const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];

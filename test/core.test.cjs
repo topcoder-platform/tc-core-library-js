@@ -9,7 +9,7 @@ const secret = 'a-test-only-secret-with-at-least-32-bytes';
 const legacyHs256Until = new Date(Date.now() + 86400000).toISOString();
 const issuer = 'https://issuer.example/';
 const config = { issuers: [{ issuer, algorithm: 'HS256', legacyHs256Until, secret, audience: 'api' }], clockTolerance: 0 };
-const sign = (claims = {}, options = {}) => jwt.sign({ sub: '42', ...claims }, secret, { issuer, audience: 'api', expiresIn: 300, ...options });
+const sign = (claims = {}, options = {}) => jwt.sign({ sub: '42', email_verified: true, ...claims }, secret, { issuer, audience: 'api', expiresIn: 300, ...options });
 
 test('verifies signed identities and exact trusted namespaced claims', async () => {
   const user = await createJwtVerifier(config).verify(sign({ 'https://topcoder.com/userId': '42', 'https://topcoder.com/roles': ['Administrator'], scope: 'read:foo' }));
@@ -49,7 +49,7 @@ test('RS256 uses configured JWKS, separates key types and rejects untrusted issu
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   const verifier = createJwtVerifier({ issuers: [{ issuer, algorithm: 'RS256', audience: 'api', jwksUri: `http://127.0.0.1:${server.address().port}/keys` }] });
-  const token = jwt.sign({ sub: '42' }, privateKey, { algorithm: 'RS256', keyid: 'key-1', issuer, audience: 'api', expiresIn: 300 });
+  const token = jwt.sign({ sub: '42', email_verified: true }, privateKey, { algorithm: 'RS256', keyid: 'key-1', issuer, audience: 'api', expiresIn: 300 });
   await assert.rejects(verifier.verify(sign({}, { issuer: 'https://untrusted.example/' })));
   assert.equal(requests, 0);
   assert.equal((await verifier.verify(token)).sub, '42');
