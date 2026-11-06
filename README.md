@@ -162,3 +162,17 @@ pnpm pack
 ```
 
 See [MIGRATION.md](MIGRATION.md) for removed APIs, deployment requirements and service coverage. Security behavior follows [JWT best current practices](https://www.rfc-editor.org/rfc/rfc8725.html) and the [jsonwebtoken verification API](https://github.com/auth0/node-jsonwebtoken).
+
+### Email verification required for member access
+
+All human access tokens must include a boolean `true` in `email_verified`,
+`emailVerified`, or `emailActive`, either at the top level or in a configured
+trusted claim namespace. Missing, false, non-boolean or conflicting claims are
+rejected with HTTP 401 by the middleware. Roles, scopes, and an `isMachine` flag
+cannot bypass this check. Genuine client-credentials grants remain supported.
+Purpose-bound activation/resend proofs continue through `verifySignedJwt`.
+
+Deploy token issuance changes first: verified members must receive this claim.
+Already-issued tokens without it will be rejected and require a fresh login.
+Upgrade consumer dependency pins and lockfiles to this revision; updating this
+repository alone does not update services pinned to older releases.

@@ -35,7 +35,7 @@ test('both JWT verifiers require expiry and cap the original lifetime at 24 hour
   for (const algorithm of ['HS256', 'RS256']) {
     const key = algorithm === 'HS256' ? secret : privateKey;
     const verificationKey = algorithm === 'HS256' ? secret : publicKey;
-    const sign = claims => jwt.sign({ sub: 'allowed', ...claims }, key, {
+    const sign = claims => jwt.sign({ sub: 'allowed', email_verified: true, ...claims }, key, {
       algorithm, issuer, audience: 'purpose', keyid: 'lifetime-key',
       noTimestamp: !Object.hasOwn(claims, 'iat'),
     });
@@ -66,7 +66,7 @@ test('HTTP middleware returns 401 for missing expiry and excessive lifetime', as
     legacyHs256Until: new Date((now + day) * 1000).toISOString(),
   }] });
   for (const claims of [{ iat: now }, { iat: now, exp: now + day + 1 }]) {
-    const token = jwt.sign(claims, secret, { issuer, audience: 'api' });
+    const token = jwt.sign({ email_verified: true, ...claims }, secret, { issuer, audience: 'api' });
     const request = { headers: { authorization: `Bearer ${token}` } };
     await new Promise((resolve, reject) => {
       const response = {
