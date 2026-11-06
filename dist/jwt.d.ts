@@ -104,7 +104,7 @@ export interface SignedJwtOptions {
     algorithms?: JwtAlgorithm[];
 }
 /** Verifies purpose-bound Identity API proofs (OTP, resend, email change) with a configured key.
- * These application proofs may omit issuer, but always require their distinct audience and expiry.
+ * These application proofs may omit issuer, but require their distinct audience, iat and exp with a lifetime of at most 24 hours.
  * @param token Compact JWT. @param key Server-configured signing key, never token-controlled.
  * @param options Required purpose audience, optional issuer/user binding, and explicit algorithms (HS256 by default).
  * @returns Verified original claims. @throws JsonWebTokenError or TokenExpiredError on verification failure.
